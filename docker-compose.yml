@@ -1,0 +1,22 @@
+services:
+  auth-bff:
+    build:
+      context: .
+    ports:
+      - 8888:8080
+    environment:
+      TZ: Asia/Tokyo
+    volumes:
+      - .:/workspace
+      - gradle-cache:/home/vscode/.gradle
+    depends_on:
+      - redis
+    command: sleep infinity
+
+  redis:
+    image: redis:8.2
+    ports:
+      - 6379:6379
+
+volumes:
+  gradle-cache:

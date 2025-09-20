@@ -1,0 +1,20 @@
+{
+  "name": "auth-bff",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "auth-bff",
+  "workspaceFolder": "/workspace",
+  "shutdownAction": "stopCompose",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+          "vscjava.vscode-java-pack",
+          "mhutchie.git-graph",
+          "streetsidesoftware.code-spell-checker",
+          "shengchen.vscode-checkstyle",
+          "cweijan.vscode-database-client2",
+          "anthropic.claude-code"
+      ]
+    }
+  },
+  "postCreateCommand": "./gradlew --version"
+}

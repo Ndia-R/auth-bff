@@ -8,21 +8,25 @@ spring:
       client:
         registration:
           keycloak:
-            client-id: ${KEYCLOAK_CLIENT_ID:auth-bff-client}
-            client-secret: ${KEYCLOAK_CLIENT_SECRET:your-client-secret-here}
+            client-id: ${KEYCLOAK_CLIENT_ID}
+            client-secret: ${KEYCLOAK_CLIENT_SECRET}
             scope: openid,profile,email
             authorization-grant-type: authorization_code
-            redirect-uri: ${KEYCLOAK_REDIRECT_URI:http://app.example.com/bff/login/oauth2/code/keycloak}
+            redirect-uri: ${KEYCLOAK_REDIRECT_URI}
         provider:
           keycloak:
-            issuer-uri: ${KEYCLOAK_ISSUER_URI:http://auth.example.com/realms/your-realm}
+            issuer-uri: ${KEYCLOAK_ISSUER_URI}
+            authorization-uri: ${KEYCLOAK_AUTHORIZATION_URI}
+            token-uri: ${KEYCLOAK_TOKEN_URI}
+            user-info-uri: ${KEYCLOAK_USERINFO_URI}
+            jwk-set-uri: ${KEYCLOAK_JWK_SET_URI}
             user-name-attribute: preferred_username
 
   # Redis Configuration for Session Storage
   data:
     redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
       timeout: 2000ms
       lettuce:
         pool:

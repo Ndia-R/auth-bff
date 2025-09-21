@@ -6,11 +6,36 @@ services:
       - 8888:8080
     environment:
       TZ: Asia/Tokyo
+      # Keycloak Configuration
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET}
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI}
+      KEYCLOAK_REDIRECT_URI: ${KEYCLOAK_REDIRECT_URI}
+      # Keycloak OAuth2 Endpoints (ネットワーク分離対応)
+      KEYCLOAK_AUTHORIZATION_URI: ${KEYCLOAK_AUTHORIZATION_URI}
+      KEYCLOAK_TOKEN_URI: ${KEYCLOAK_TOKEN_URI}
+      KEYCLOAK_USERINFO_URI: ${KEYCLOAK_USERINFO_URI}
+      KEYCLOAK_JWK_SET_URI: ${KEYCLOAK_JWK_SET_URI}
+      # Redis Configuration
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      # BFF Configuration
+      BFF_BASE_URL: ${BFF_BASE_URL}
+      API_BASE_URL: ${API_BASE_URL}
+      # Security Configuration
+      COOKIE_SECURE: ${COOKIE_SECURE}
+      COOKIE_SAME_SITE: ${COOKIE_SAME_SITE}
+      SESSION_TIMEOUT: ${SESSION_TIMEOUT}
     volumes:
       - .:/workspace
       - gradle-cache:/home/vscode/.gradle
+      # Claude Code用の永続化設定（プロジェクト固有）
+      - claude-config:/home/vscode/.claude
+      - claude-history:/commandhistory
+      - claude-npm-global:/home/vscode/.npm-global
     depends_on:
       - redis
+      - keycloak
     command: sleep infinity
 
   redis:
@@ -18,5 +43,27 @@ services:
     ports:
       - 6379:6379
 
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.3.3
+    ports:
+      - 8180:8080
+    environment:
+      TZ: Asia/Tokyo
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_DB: dev-file
+      KC_HOSTNAME_STRICT: false
+      KC_HOSTNAME_STRICT_HTTPS: false
+      KC_HTTP_ENABLED: true
+    volumes:
+      - ./realm-export.json:/opt/keycloak/data/import/realm-export.json
+      - keycloak-data:/opt/keycloak/data
+    command: start-dev --import-realm
+
 volumes:
   gradle-cache:
+  keycloak-data:
+  # Claude Code用のボリューム（プロジェクト固有）
+  claude-config:      # Claude設定・認証情報
+  claude-history:     # コマンド履歴
+  claude-npm-global:  # npmグローバルパッケージ

@@ -1,5 +1,9 @@
 # Auth BFF (Backend for Frontend) プロジェクト
 
+# 重要
+
+基本的なやりとりは日本語でおこなってください。
+
 ## 概要
 KeycloakとのOAuth2認証フローを処理するSpring BootのBFF (Backend for Frontend)アプリケーションです。
 
@@ -92,6 +96,35 @@ REDIS_HOST=localhost
 REDIS_PORT=6379
 ```
 
+## 開発環境
+
+### DevContainer環境
+このプロジェクトは **WSL2上のUbuntu** で **VSCode DevContainer** を使用して開発しています。
+
+```
+WSL2 (Ubuntu) → Docker → DevContainer (auth-bff)
+                   ↓
+               Redis Container
+```
+
+### 開発環境の構成
+- **プラットフォーム**: WSL2 + Ubuntu
+- **IDE**: VSCode with DevContainer
+- **Java**: Eclipse Temurin 17
+- **コンテナ構成**:
+  - `auth-bff`: アプリケーションコンテナ (port 8888:8080)
+  - `redis`: セッションストレージ (port 6379)
+- **外部依存**: Keycloak (別途起動が必要)
+
+### DevContainer起動
+```bash
+# VSCodeでプロジェクトを開く
+code .
+
+# DevContainerで再開する（VSCode Command Palette）
+> Dev Containers: Reopen in Container
+```
+
 ## ビルド・実行
 
 ```bash
@@ -104,7 +137,7 @@ REDIS_PORT=6379
 # アプリケーション実行
 ./gradlew bootRun
 
-# Docker Compose実行
+# Docker Compose実行（DevContainer環境では不要）
 docker compose up
 ```
 
@@ -145,6 +178,109 @@ docker compose up redis -d
 3. **セッション問題**
    - Redis接続確認
    - Cookie設定（Secure属性）確認
+
+4. **🔥 DevContainer環境でのKeycloak接続エラー**
+
+   **症状**: `Unable to resolve Configuration with the provided Issuer of "http://localhost:8180/realms/test-user-realm"`
+
+   **原因**: WSL2 + DevContainer環境でのネットワーク構成の違い
+   ```
+   WSL2 (Ubuntu) + VSCode DevContainer環境
+   ├── auth-bff (DevContainer内) :8080 → :8888 (外部)
+   ├── keycloak (Docker) :8080 → :8180 (外部)
+   └── redis (Docker) :6379 → :6379 (外部)
+   ```
+
+   **解決方法**: OAuth2認証フローにおけるURL設定の使い分け
+
+   - **issuer-uri**: Spring Bootアプリ（コンテナ内）がKeycloakのメタデータを取得するため
+     ```bash
+     KEYCLOAK_ISSUER_URI=http://keycloak:8080/realms/test-user-realm  # ← コンテナ間通信
+     ```
+
+   - **redirect-uri**: ブラウザがKeycloakから戻ってくる際のコールバックURL
+     ```bash
+     KEYCLOAK_REDIRECT_URI=http://localhost:8888/bff/login/oauth2/code/keycloak  # ← 外部アクセス
+     ```
+
+   **正しい起動コマンド**:
+   ```bash
+   KEYCLOAK_ISSUER_URI=http://keycloak:8080/realms/test-user-realm \
+   KEYCLOAK_REDIRECT_URI=http://localhost:8888/bff/login/oauth2/code/keycloak \
+   REDIS_HOST=redis \
+   REDIS_PORT=6379 \
+   ./gradlew bootRun
+   ```
+
+5. **🔥 OAuth2ネットワーク分離問題（重要）**
+
+   **症状**: ブラウザで「このサイトにアクセスできません」、ログに`http://keycloak:8080`へのリダイレクト
+
+   **根本原因**: OAuth2認証フローでのネットワーク分離
+   ```
+   OAuth2認証フロー:
+   1. BFF → Keycloak (メタデータ取得)     : コンテナ内部通信
+   2. ブラウザ → Keycloak (認証画面)     : ホストネットワーク  ⚠️ここで失敗
+   3. Keycloak → BFF (コールバック)      : ホストネットワーク
+   4. BFF → Keycloak (トークン交換)      : コンテナ内部通信
+   ```
+
+   **問題の詳細**:
+   - Spring SecurityがKeycloakのメタデータから`authorization_endpoint`を自動取得
+   - メタデータはコンテナ内部URL(`keycloak:8080`)を含む
+   - ブラウザは`keycloak:8080`を解決できない
+
+   **完全な解決方法**: `application.yml`で明示的なエンドポイント指定
+
+   ```yaml
+   spring:
+     security:
+       oauth2:
+         client:
+           provider:
+             keycloak:
+               issuer-uri: ${KEYCLOAK_ISSUER_URI}  # メタデータ取得用（内部）
+               authorization-uri: ${KEYCLOAK_AUTHORIZATION_URI}  # ブラウザ用（外部）
+               token-uri: ${KEYCLOAK_TOKEN_URI}  # トークン交換用（内部）
+               user-info-uri: ${KEYCLOAK_USERINFO_URI}  # ユーザー情報用（内部）
+               jwk-set-uri: ${KEYCLOAK_JWK_SET_URI}  # JWT検証用（内部）
+   ```
+
+   **環境変数設定** (`.env`ファイル):
+   ```bash
+   # 基本設定
+   KEYCLOAK_ISSUER_URI=http://keycloak:8080/realms/test-user-realm
+   KEYCLOAK_REDIRECT_URI=http://localhost:8888/bff/login/oauth2/code/keycloak
+
+   # ネットワーク分離対応
+   KEYCLOAK_AUTHORIZATION_URI=http://localhost:8180/realms/test-user-realm/protocol/openid-connect/auth
+   KEYCLOAK_TOKEN_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/token
+   KEYCLOAK_USERINFO_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/userinfo
+   KEYCLOAK_JWK_SET_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/certs
+   ```
+
+   **Spring Security内部の動作**:
+   ```java
+   // SecurityConfig.java の "keycloak" がapplication.ymlのregistration名と対応
+   .oauth2Login(oauth2 -> oauth2.loginPage("/oauth2/authorization/keycloak"))
+
+   // OAuth2AuthorizationRequestRedirectFilter が以下を実行:
+   ClientRegistration keycloak = clientRegistrationRepository.findByRegistrationId("keycloak");
+   String authUrl = keycloak.getProviderDetails().getAuthorizationUri();  // localhost:8180を使用
+   // ブラウザを authUrl にリダイレクト
+   ```
+
+   **デバッグ方法**:
+   ```bash
+   # 起動時にClientRegistration情報をログ出力
+   logging.level.org.springframework.security.oauth2: DEBUG
+
+   # 期待する動作確認
+   curl -v http://localhost:8888/bff/auth/login
+   # → Location: http://localhost:8180/realms/test-user-realm/protocol/openid-connect/auth?...
+   ```
+
+   **この問題は毎回発生するため、必ずエンドポイントを明示的に設定すること！**
 
 ### ログ確認
 ```bash

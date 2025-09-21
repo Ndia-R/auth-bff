@@ -9,23 +9,33 @@ RUN apt-get update && \
 # 既存ユーザーがいないので、新規作成
 RUN useradd -m vscode
 
-# rootユーザーで作業ディレクトリの所有者とグループを変更
+# rootユーザーで必要なディレクトリを作成・権限設定
 USER root
 WORKDIR /workspace
 RUN chown vscode:vscode /workspace
+
+# Claude Code用のディレクトリを作成（rootで作成してからvscodeに権限を渡す）
+RUN mkdir -p /home/vscode/.claude && \
+    mkdir -p /commandhistory && \
+    chown -R vscode:vscode /home/vscode/.claude && \
+    chown -R vscode:vscode /commandhistory
 
 # ユーザー変更
 USER vscode
 
 # .gradleディレクトリはvolumeとしてバインドするので
 # そのためのディレクトリをあらかじめ作成しておく
-RUN mkdir -p /home/vscode/.gradle && \
-    chown -R vscode:vscode /home/vscode/.gradle
+RUN mkdir -p /home/vscode/.gradle
 
 # vscodeユーザー用のnpmグローバルディレクトリを設定
 RUN mkdir ~/.npm-global && \
     npm config set prefix '~/.npm-global' && \
     echo 'export PATH=~/.npm-global/bin:$PATH' >> ~/.bashrc
+
+# bash履歴の永続化設定
+RUN echo "export PROMPT_COMMAND='history -a'" >> ~/.bashrc && \
+    echo "export HISTFILE=/commandhistory/.bash_history" >> ~/.bashrc && \
+    touch /commandhistory/.bash_history
 
 # Claude Codeをvscodeユーザーでインストール
 RUN npm install -g @anthropic-ai/claude-code

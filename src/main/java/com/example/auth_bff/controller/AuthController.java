@@ -2,8 +2,7 @@ package com.example.auth_bff.controller;
 
 import com.example.auth_bff.dto.AccessTokenResponse;
 import com.example.auth_bff.dto.UserResponse;
-import com.example.auth_bff.exception.UnauthorizedException;
-import com.example.auth_bff.service.TokenService;
+import com.example.auth_bff.service.AuthService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.core.user.OAuth2User;
@@ -26,29 +25,11 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class AuthController {
 
-    private final TokenService tokenService;
+    private final AuthService authService;
 
     @GetMapping("/login")
     public ResponseEntity<AccessTokenResponse> login(@AuthenticationPrincipal OAuth2User principal) {
-        if (principal == null) {
-            throw new UnauthorizedException("認証が必要です");
-        }
-
-        String principalName = principal.getAttribute("preferred_username");
-        if (principalName == null) {
-            principalName = principal.getName();
-        }
-
-        String accessToken = tokenService.getAccessToken(principalName);
-        long expiresIn = tokenService.getExpiresIn(principalName);
-        String tokenType = tokenService.getTokenType(principalName);
-
-        AccessTokenResponse response = new AccessTokenResponse(
-            accessToken,
-            (int) expiresIn,
-            tokenType
-        );
-
+        AccessTokenResponse response = authService.getAccessToken(principal);
         return ResponseEntity.ok(response);
     }
 
@@ -68,32 +49,13 @@ public class AuthController {
 
     @GetMapping("/user")
     public ResponseEntity<UserResponse> user(@AuthenticationPrincipal OAuth2User principal) {
-        if (principal == null) {
-            throw new UnauthorizedException("認証が必要です");
-        }
-
-        UserResponse userResponse = new UserResponse(
-            principal.getAttribute("name"),
-            principal.getAttribute("email"),
-            principal.getAttribute("preferred_username")
-        );
-
-        return ResponseEntity.ok(userResponse);
+        UserResponse response = authService.getUserInfo(principal);
+        return ResponseEntity.ok(response);
     }
 
     @PostMapping("/refresh")
     public ResponseEntity<AccessTokenResponse> refresh(@AuthenticationPrincipal OAuth2User principal) {
-        if (principal == null) {
-            throw new UnauthorizedException("認証が必要です");
-        }
-
-        String principalName = principal.getAttribute("preferred_username");
-        if (principalName == null) {
-            principalName = principal.getName();
-        }
-
-        AccessTokenResponse response = tokenService.refreshAccessToken(principalName);
-
+        AccessTokenResponse response = authService.refreshAccessToken(principal);
         return ResponseEntity.ok(response);
     }
 

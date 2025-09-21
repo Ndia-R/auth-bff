@@ -1,13 +1,11 @@
 package com.example.auth_bff.service;
 
-import com.example.auth_bff.dto.AccessTokenResponse;
 import com.example.auth_bff.exception.UnauthorizedException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
-import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.core.OAuth2AccessToken;
 import org.springframework.security.oauth2.core.OAuth2RefreshToken;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AccessTokenResponse;
@@ -25,8 +23,7 @@ import java.time.Instant;
 public class TokenService {
 
     private final OAuth2AuthorizedClientService authorizedClientService;
-    private final ClientRegistrationRepository clientRegistrationRepository;
-    private final WebClient webClient = WebClient.builder().build();
+    private final WebClient webClient;
 
     public OAuth2AuthorizedClient getAuthorizedClient(String principalName) {
         return authorizedClientService.loadAuthorizedClient("keycloak", principalName);
@@ -34,29 +31,38 @@ public class TokenService {
 
     public String getAccessToken(String principalName) {
         OAuth2AuthorizedClient authorizedClient = getAuthorizedClient(principalName);
-        if (authorizedClient != null && authorizedClient.getAccessToken() != null) {
-            return authorizedClient.getAccessToken().getTokenValue();
+        if (authorizedClient == null) {
+            throw new UnauthorizedException("認証されたクライアントが見つかりません");
         }
-        return null;
+        if (authorizedClient.getAccessToken() == null) {
+            throw new UnauthorizedException("アクセストークンが見つかりません");
+        }
+        return authorizedClient.getAccessToken().getTokenValue();
     }
 
     public long getExpiresIn(String principalName) {
         OAuth2AuthorizedClient authorizedClient = getAuthorizedClient(principalName);
-        if (authorizedClient != null && authorizedClient.getAccessToken() != null) {
-            return calculateExpiresIn(authorizedClient.getAccessToken());
+        if (authorizedClient == null) {
+            throw new UnauthorizedException("認証されたクライアントが見つかりません");
         }
-        return 3600; // デフォルト1時間
+        if (authorizedClient.getAccessToken() == null) {
+            throw new UnauthorizedException("アクセストークンが見つかりません");
+        }
+        return calculateExpiresIn(authorizedClient.getAccessToken());
     }
 
     public String getTokenType(String principalName) {
         OAuth2AuthorizedClient authorizedClient = getAuthorizedClient(principalName);
-        if (authorizedClient != null && authorizedClient.getAccessToken() != null) {
-            return authorizedClient.getAccessToken().getTokenType().getValue();
+        if (authorizedClient == null) {
+            throw new UnauthorizedException("認証されたクライアントが見つかりません");
         }
-        return "Bearer"; // デフォルト
+        if (authorizedClient.getAccessToken() == null) {
+            throw new UnauthorizedException("アクセストークンが見つかりません");
+        }
+        return authorizedClient.getAccessToken().getTokenType().getValue();
     }
 
-    public AccessTokenResponse refreshAccessToken(String principalName) {
+    public OAuth2AccessToken refreshAccessToken(String principalName) {
         OAuth2AuthorizedClient authorizedClient = getAuthorizedClient(principalName);
 
         if (authorizedClient == null) {
@@ -83,14 +89,8 @@ public class TokenService {
 
             authorizedClientService.saveAuthorizedClient(updatedClient, null);
 
-            AccessTokenResponse response = new AccessTokenResponse(
-                tokenResponse.getAccessToken().getTokenValue(),
-                (int) calculateExpiresIn(tokenResponse.getAccessToken()),
-                tokenResponse.getAccessToken().getTokenType().getValue()
-            );
-
             log.info("アクセストークンのリフレッシュが成功しました: {}", principalName);
-            return response;
+            return tokenResponse.getAccessToken();
 
         } catch (Exception e) {
             log.error("トークンリフレッシュ中にエラーが発生しました: {}", e.getMessage(), e);
@@ -116,9 +116,10 @@ public class TokenService {
             .block();
     }
 
-    private long calculateExpiresIn(OAuth2AccessToken accessToken) {
-        if (accessToken.getExpiresAt() != null) {
-            return accessToken.getExpiresAt().getEpochSecond() - Instant.now().getEpochSecond();
+    public long calculateExpiresIn(OAuth2AccessToken accessToken) {
+        Instant expiresAt = accessToken.getExpiresAt();
+        if (expiresAt != null) {
+            return expiresAt.getEpochSecond() - Instant.now().getEpochSecond();
         }
         return 3600; // デフォルト1時間
     }

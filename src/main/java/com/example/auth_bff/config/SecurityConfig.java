@@ -28,7 +28,7 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(
                 authz -> authz
-                    .requestMatchers("/auth/health")
+                    .requestMatchers("/bff/auth/health")
                     .permitAll()
                     .anyRequest()
                     .authenticated()
@@ -37,12 +37,12 @@ public class SecurityConfig {
                 oauth2 -> oauth2
                     .loginPage("/oauth2/authorization/keycloak")
                     .successHandler(authenticationSuccessHandler())
-                    .defaultSuccessUrl("/auth/login", true)
+                    .defaultSuccessUrl("/bff/auth/login", true)
             )
             .logout(
                 logout -> logout
-                    .logoutUrl("/auth/logout")
-                    .logoutSuccessUrl("/auth/health")
+                    .logoutUrl("/bff/auth/logout")
+                    .logoutSuccessUrl("/bff/auth/health")
                     .invalidateHttpSession(true)
                     .deleteCookies("BFFSESSIONID")
             );
@@ -53,7 +53,7 @@ public class SecurityConfig {
     @Bean
     public AuthenticationSuccessHandler authenticationSuccessHandler() {
         SimpleUrlAuthenticationSuccessHandler handler = new SimpleUrlAuthenticationSuccessHandler();
-        handler.setDefaultTargetUrl("/auth/login");
+        handler.setDefaultTargetUrl("/bff/auth/login");
         handler.setAlwaysUseDefaultTargetUrl(true);
         return handler;
     }

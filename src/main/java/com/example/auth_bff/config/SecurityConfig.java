@@ -26,20 +26,25 @@ public class SecurityConfig {
         http
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .csrf(csrf -> csrf.disable())
-            .authorizeHttpRequests(authz -> authz
-                .requestMatchers("/auth/health").permitAll()
-                .anyRequest().authenticated()
+            .authorizeHttpRequests(
+                authz -> authz
+                    .requestMatchers("/auth/health")
+                    .permitAll()
+                    .anyRequest()
+                    .authenticated()
             )
-            .oauth2Login(oauth2 -> oauth2
-                .loginPage("/oauth2/authorization/keycloak")
-                .successHandler(authenticationSuccessHandler())
-                .defaultSuccessUrl("/auth/login", true)
+            .oauth2Login(
+                oauth2 -> oauth2
+                    .loginPage("/oauth2/authorization/keycloak")
+                    .successHandler(authenticationSuccessHandler())
+                    .defaultSuccessUrl("/auth/login", true)
             )
-            .logout(logout -> logout
-                .logoutUrl("/auth/logout")
-                .logoutSuccessUrl("/auth/health")
-                .invalidateHttpSession(true)
-                .deleteCookies("BFFSESSIONID")
+            .logout(
+                logout -> logout
+                    .logoutUrl("/auth/logout")
+                    .logoutSuccessUrl("/auth/health")
+                    .invalidateHttpSession(true)
+                    .deleteCookies("BFFSESSIONID")
             );
 
         return http.build();
@@ -55,8 +60,9 @@ public class SecurityConfig {
 
     @Bean
     public OAuth2AuthorizedClientRepository authorizedClientRepository(
-            ClientRegistrationRepository clientRegistrationRepository,
-            OAuth2AuthorizedClientService authorizedClientService) {
+        ClientRegistrationRepository clientRegistrationRepository,
+        OAuth2AuthorizedClientService authorizedClientService
+    ) {
         return new AuthenticatedPrincipalOAuth2AuthorizedClientRepository(authorizedClientService);
     }
 

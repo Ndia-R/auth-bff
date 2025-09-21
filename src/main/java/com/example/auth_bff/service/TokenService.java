@@ -98,7 +98,10 @@ public class TokenService {
         }
     }
 
-    private OAuth2AccessTokenResponse performTokenRefresh(OAuth2AuthorizedClient authorizedClient, OAuth2RefreshToken refreshToken) {
+    private OAuth2AccessTokenResponse performTokenRefresh(
+        OAuth2AuthorizedClient authorizedClient,
+        OAuth2RefreshToken refreshToken
+    ) {
         ClientRegistration clientRegistration = authorizedClient.getClientRegistration();
 
         MultiValueMap<String, String> requestBody = new LinkedMultiValueMap<>();
@@ -123,7 +126,6 @@ public class TokenService {
         }
         return 3600; // デフォルト1時間
     }
-
 
     public boolean isTokenExpired(String principalName) {
         OAuth2AuthorizedClient authorizedClient = getAuthorizedClient(principalName);

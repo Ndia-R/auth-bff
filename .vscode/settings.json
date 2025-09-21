@@ -1,0 +1,49 @@
+{
+  // ミニマップを非表示にする
+  "editor.minimap.enabled": false,
+
+  // 制御文字を表示する
+  "editor.renderControlCharacters": true,
+
+  // コードフォーマット
+  "editor.defaultFormatter": "redhat.java",
+  "java.format.settings.url": "${workspaceFolder}/.vscode/claude-java-formatter.xml",
+  "java.format.settings.profile": "ClaudeJavaStyle",
+
+  // ファイル保存時にフォーマット
+  "[java]": {
+    "editor.formatOnSave": true
+  },
+
+  // コード補完機能を有効にするかどうか
+  "java.completion.enabled": true,
+
+  // Nullアノテーションタイプの解析を有効にする
+  "java.compile.nullAnalysis.mode": "automatic",
+
+  // スペルチェックの対象外にするワード
+  "cSpell.words": [
+    "Cacheable",
+    "checkstyle",
+    "esbenp",
+    "initdb",
+    "mhutchie",
+    "mosapride",
+    "mysqld",
+    "Servlet",
+    "shengchen",
+    "springframework",
+    "userdetails",
+    "vscjava",
+    "zenkaku"
+  ],
+
+  // スペルチェックの対象外にするファイル
+  "cSpell.files": ["devcontainer.json"],
+
+  // Javaのビルド構成（build.gradleやpom.xmlなど）が変更された場合に、VS Codeがその変更を反映するよう促すダイアログを表示
+  "java.configuration.updateBuildConfiguration": "interactive",
+
+  // リモート開発環境（例えば、SSHやDevContainerなど）で、ポートフォワードが自動的に行われない場合のフォールバック動作を制御
+  "remote.autoForwardPortsFallback": 0
+}

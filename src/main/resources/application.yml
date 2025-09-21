@@ -1,0 +1,76 @@
+spring:
+  application:
+    name: auth-bff
+
+  # OAuth2 Client Configuration
+  security:
+    oauth2:
+      client:
+        registration:
+          keycloak:
+            client-id: ${KEYCLOAK_CLIENT_ID:auth-bff-client}
+            client-secret: ${KEYCLOAK_CLIENT_SECRET:your-client-secret-here}
+            scope: openid,profile,email
+            authorization-grant-type: authorization_code
+            redirect-uri: ${KEYCLOAK_REDIRECT_URI:http://app.example.com/bff/login/oauth2/code/keycloak}
+        provider:
+          keycloak:
+            issuer-uri: ${KEYCLOAK_ISSUER_URI:http://auth.example.com/realms/your-realm}
+            user-name-attribute: preferred_username
+
+  # Redis Configuration for Session Storage
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+
+  # Session Configuration
+  session:
+    store-type: redis
+    timeout: 30m
+    redis:
+      flush-mode: on_save
+      namespace: spring:session
+    cookie:
+      name: BFFSESSIONID
+      http-only: true
+      secure: true
+      same-site: lax
+      max-age: 1800
+
+# Server Configuration
+server:
+  port: 8080
+  servlet:
+    context-path: /
+    session:
+      cookie:
+        http-only: true
+        secure: true
+        same-site: lax
+
+# Logging Configuration
+logging:
+  level:
+    org.springframework.security: DEBUG
+    org.springframework.security.oauth2: DEBUG
+    org.springframework.session: DEBUG
+    com.example.auth_bff: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+
+# Management and Actuator
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when_authorized

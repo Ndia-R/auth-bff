@@ -32,7 +32,7 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(
                 authz -> authz
-                    .requestMatchers("/bff/auth/health", "/oauth2/**", "/login/oauth2/**", "/bff/login/oauth2/**")
+                    .requestMatchers("/bff/auth/health", "/bff/auth/logout", "/oauth2/**", "/login/oauth2/**", "/bff/login/oauth2/**")
                     .permitAll()
                     .anyRequest()
                     .authenticated()
@@ -49,13 +49,9 @@ public class SecurityConfig {
                     )
                     .successHandler(authenticationSuccessHandler())
             )
-            .logout(
-                logout -> logout
-                    .logoutUrl("/bff/auth/logout")
-                    .logoutSuccessUrl("/bff/auth/health")
-                    .invalidateHttpSession(true)
-                    .deleteCookies("BFFSESSIONID")
-            );
+            // ログアウトはカスタムエンドポイント(/bff/auth/logout)で処理するため
+            // Spring Security標準のログアウト機能は無効化
+            .logout(logout -> logout.disable());
 
         return http.build();
     }

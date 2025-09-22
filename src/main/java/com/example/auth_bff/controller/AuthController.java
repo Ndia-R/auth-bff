@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
@@ -34,16 +35,37 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<Map<String, String>> logout(HttpServletRequest request, HttpServletResponse response) {
+    public ResponseEntity<Map<String, String>> logout(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            @AuthenticationPrincipal OAuth2User principal) {
+
+        String username = (principal != null) ? principal.getName() : "anonymous";
+        boolean wasAuthenticated = (principal != null);
+
+        // セッション無効化
         HttpSession session = request.getSession(false);
         if (session != null) {
             session.invalidate();
+            System.out.println("Session invalidated for user: " + username);
+        } else {
+            System.out.println("No active session found for user: " + username);
         }
 
+        // セキュリティコンテキストクリア
         SecurityContextHolder.clearContext();
+
+        // クッキー削除
+        Cookie sessionCookie = new Cookie("BFFSESSIONID", null);
+        sessionCookie.setPath("/");
+        sessionCookie.setHttpOnly(true);
+        sessionCookie.setMaxAge(0);
+        response.addCookie(sessionCookie);
 
         Map<String, String> result = new HashMap<>();
         result.put("message", "Logged out successfully");
+        result.put("user", username);
+        result.put("wasAuthenticated", String.valueOf(wasAuthenticated));
         return ResponseEntity.ok(result);
     }
 

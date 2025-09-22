@@ -5,22 +5,23 @@
 基本的なやりとりは日本語でおこなってください。
 
 ## 概要
-KeycloakとのOAuth2認証フローを処理するSpring BootのBFF (Backend for Frontend)アプリケーションです。
+KeycloakとのOAuth2認証フローを処理するSpring BootのBFF (Backend for Frontend)アプリケーションです。PKCE（Proof Key for Code Exchange）対応により、よりセキュアなOAuth2認証を実現しています。
 
 ## アーキテクチャ
 
-### 認証フロー
+### 認証フロー（PKCE対応）
 ```
 フロント(SPA) → BFF → Keycloak → BFF → フロント
      ↓               ↓        ↓       ↓
   /bff/auth/login  OAuth2   JWT    SessionCookie
+                  (PKCE)
 ```
 
 ### 主要コンポーネント
 - **AuthController**: HTTP認証エンドポイント
 - **AuthService**: 認証ビジネスロジック
 - **TokenService**: OAuth2トークン管理
-- **SecurityConfig**: Spring Security設定
+- **SecurityConfig**: Spring Security設定（PKCE対応）
 - **GlobalExceptionHandler**: 統一エラーハンドリング
 
 ## エンドポイント
@@ -84,45 +85,63 @@ KeycloakとのOAuth2認証フローを処理するSpring BootのBFF (Backend for
 
 ## 環境変数
 
+### 基本設定
 ```bash
 # Keycloak設定
-KEYCLOAK_CLIENT_ID=auth-bff-client
-KEYCLOAK_CLIENT_SECRET=your-client-secret-here
-KEYCLOAK_ISSUER_URI=http://auth.example.com/realms/your-realm
-KEYCLOAK_REDIRECT_URI=http://app.example.com/bff/login/oauth2/code/keycloak
+KEYCLOAK_CLIENT_ID=my-books-client
+KEYCLOAK_CLIENT_SECRET=your-client-secret
+KEYCLOAK_REDIRECT_URI=http://localhost:8888/bff/login/oauth2/code/keycloak
+
+# 本番環境（シンプルな設定）
+KEYCLOAK_ISSUER_URI=https://auth.example.com/realms/test-user-realm
+
+# 開発環境（個別エンドポイント指定でネットワーク分離問題を解決）
+KEYCLOAK_AUTHORIZE_URI=http://localhost:8180/realms/test-user-realm/protocol/openid-connect/auth
+KEYCLOAK_TOKEN_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/token
+KEYCLOAK_JWK_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/certs
 
 # Redis設定
-REDIS_HOST=localhost
+REDIS_HOST=redis
 REDIS_PORT=6379
+
+# セキュリティ設定
+COOKIE_SECURE=false
+COOKIE_SAME_SITE=lax
+SESSION_TIMEOUT=30m
 ```
 
 ## 開発環境
 
-### DevContainer環境
-このプロジェクトは **WSL2上のUbuntu** で **VSCode DevContainer** を使用して開発しています。
+### Docker Compose環境
+このプロジェクトは **WSL2上のUbuntu** で **Docker Compose** を使用して開発しています。Claude Code対応の完全な開発環境を提供します。
 
 ```
-WSL2 (Ubuntu) → Docker → DevContainer (auth-bff)
-                   ↓
-               Redis Container
+WSL2 (Ubuntu) → Docker Compose
+                   ├── auth-bff (Eclipse Temurin 17 + Claude Code)
+                   ├── redis (セッションストレージ)
+                   └── keycloak (認証サーバー + realm-export.json)
 ```
 
 ### 開発環境の構成
-- **プラットフォーム**: WSL2 + Ubuntu
-- **IDE**: VSCode with DevContainer
+- **プラットフォーム**: WSL2 + Ubuntu + Docker Compose
+- **IDE**: Claude Code (Anthropic AI) + VSCode対応
 - **Java**: Eclipse Temurin 17
 - **コンテナ構成**:
   - `auth-bff`: アプリケーションコンテナ (port 8888:8080)
   - `redis`: セッションストレージ (port 6379)
-- **外部依存**: Keycloak (別途起動が必要)
+  - `keycloak`: 認証サーバー (port 8180:8080)
 
-### DevContainer起動
+### 開発環境起動
 ```bash
-# VSCodeでプロジェクトを開く
-code .
+# Docker Compose環境起動
+docker compose up -d
 
-# DevContainerで再開する（VSCode Command Palette）
-> Dev Containers: Reopen in Container
+# auth-bffコンテナに接続してClaude Code使用
+docker compose exec auth-bff bash
+
+# または、VSCodeでDevContainer接続
+code .
+# Dev Containers: Reopen in Container
 ```
 
 ## ビルド・実行
@@ -137,8 +156,8 @@ code .
 # アプリケーション実行
 ./gradlew bootRun
 
-# Docker Compose実行（DevContainer環境では不要）
-docker compose up
+# Docker Compose実行（完全環境）
+docker compose up -d
 ```
 
 ## 開発時の注意点
@@ -205,10 +224,19 @@ docker compose up redis -d
 
    **正しい起動コマンド**:
    ```bash
-   KEYCLOAK_ISSUER_URI=http://keycloak:8080/realms/test-user-realm \
+   # 開発環境用（すべての環境変数を明示）
+   KEYCLOAK_CLIENT_ID=my-books-client \
+   KEYCLOAK_CLIENT_SECRET=your-client-secret \
    KEYCLOAK_REDIRECT_URI=http://localhost:8888/bff/login/oauth2/code/keycloak \
+   KEYCLOAK_AUTHORIZE_URI=http://localhost:8180/realms/test-user-realm/protocol/openid-connect/auth \
+   KEYCLOAK_TOKEN_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/token \
+   KEYCLOAK_JWK_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/certs \
    REDIS_HOST=redis \
    REDIS_PORT=6379 \
+   ./gradlew bootRun
+
+   # .envファイルを使用する場合
+   # （docker-compose.ymlが.envを自動読み込み）
    ./gradlew bootRun
    ```
 
@@ -239,24 +267,29 @@ docker compose up redis -d
          client:
            provider:
              keycloak:
-               issuer-uri: ${KEYCLOAK_ISSUER_URI}  # メタデータ取得用（内部）
-               authorization-uri: ${KEYCLOAK_AUTHORIZATION_URI}  # ブラウザ用（外部）
-               token-uri: ${KEYCLOAK_TOKEN_URI}  # トークン交換用（内部）
-               user-info-uri: ${KEYCLOAK_USERINFO_URI}  # ユーザー情報用（内部）
-               jwk-set-uri: ${KEYCLOAK_JWK_SET_URI}  # JWT検証用（内部）
+               # 本番環境では以下のissuer-uriのみ使用
+               # issuer-uri: ${KEYCLOAK_ISSUER_URI}
+
+               # 開発環境では個別エンドポイント指定
+               authorization-uri: ${KEYCLOAK_AUTHORIZE_URI}  # ブラウザ用（外部）
+               token-uri: ${KEYCLOAK_TOKEN_URI}             # トークン交換用（内部）
+               jwk-set-uri: ${KEYCLOAK_JWK_URI}             # JWT検証用（内部）
    ```
 
    **環境変数設定** (`.env`ファイル):
    ```bash
    # 基本設定
-   KEYCLOAK_ISSUER_URI=http://keycloak:8080/realms/test-user-realm
+   KEYCLOAK_CLIENT_ID=my-books-client
+   KEYCLOAK_CLIENT_SECRET=your-client-secret
    KEYCLOAK_REDIRECT_URI=http://localhost:8888/bff/login/oauth2/code/keycloak
 
-   # ネットワーク分離対応
-   KEYCLOAK_AUTHORIZATION_URI=http://localhost:8180/realms/test-user-realm/protocol/openid-connect/auth
+   # 本番環境用（シンプル）
+   KEYCLOAK_ISSUER_URI=https://auth.example.com/realms/test-user-realm
+
+   # 開発環境用（ネットワーク分離対応）
+   KEYCLOAK_AUTHORIZE_URI=http://localhost:8180/realms/test-user-realm/protocol/openid-connect/auth
    KEYCLOAK_TOKEN_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/token
-   KEYCLOAK_USERINFO_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/userinfo
-   KEYCLOAK_JWK_SET_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/certs
+   KEYCLOAK_JWK_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/certs
    ```
 
    **Spring Security内部の動作**:
@@ -281,6 +314,51 @@ docker compose up redis -d
    ```
 
    **この問題は毎回発生するため、必ずエンドポイントを明示的に設定すること！**
+
+### 🔥 新機能・改善点
+
+6. **PKCE (Proof Key for Code Exchange) 対応**
+
+   **機能**: より安全なOAuth2認証フロー
+   ```java
+   // SecurityConfig.java
+   @Bean
+   public OAuth2AuthorizationRequestResolver pkceResolver(ClientRegistrationRepository clientRegistrationRepository) {
+       DefaultOAuth2AuthorizationRequestResolver authorizationRequestResolver =
+           new DefaultOAuth2AuthorizationRequestResolver(clientRegistrationRepository, "/oauth2/authorization");
+       authorizationRequestResolver.setAuthorizationRequestCustomizer(
+           OAuth2AuthorizationRequestCustomizers.withPkce()
+       );
+       return authorizationRequestResolver;
+   }
+   ```
+
+7. **Claude Code開発環境の充実**
+
+   **機能**: AI支援開発環境の完全対応
+   - Dockerfileに`@anthropic-ai/claude-code`インストール
+   - vscodeユーザーでの適切な権限管理
+   - npm global、bash履歴、設定の永続化
+   - Serena MCP対応（`uv`インストール済み）
+
+8. **詳細ログ設定**
+
+   **機能**: 開発時のデバッグを支援
+   ```yaml
+   logging:
+     level:
+       org.springframework.security.oauth2: DEBUG
+       org.springframework.http.client: DEBUG
+       org.apache.http: DEBUG
+       org.springframework.web.client.RestTemplate: TRACE
+   ```
+
+9. **Keycloak設定の自動化**
+
+   **機能**: `realm-export.json`による設定管理
+   - クライアント設定、ユーザー、ロール等を含む
+   - `docker compose up`で自動インポート
+   - 開発環境の即座利用可能
 
 ### ログ確認
 ```bash

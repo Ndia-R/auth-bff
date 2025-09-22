@@ -25,52 +25,63 @@ import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequest
 public class SecurityConfig {
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http, OAuth2AuthorizationRequestResolver pkceResolver)
-        throws Exception {
-        http
-            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
-            .csrf(csrf -> csrf.disable())
-            .authorizeHttpRequests(
-                authz -> authz
-                    .requestMatchers("/bff/auth/health", "/bff/auth/logout", "/oauth2/**", "/login/oauth2/**", "/bff/login/oauth2/**")
-                    .permitAll()
-                    .anyRequest()
-                    .authenticated()
-            )
-            .oauth2Login(
-                oauth2 -> oauth2
-                    .authorizationEndpoint(
-                        authz -> authz
-                            .authorizationRequestResolver(pkceResolver)
-                    )
-                    .redirectionEndpoint(
-                        redirection -> redirection
-                            .baseUri("/bff/login/oauth2/code/*")
-                    )
-                    .successHandler(authenticationSuccessHandler())
-            )
-            // ログアウトはカスタムエンドポイント(/bff/auth/logout)で処理するため
-            // Spring Security標準のログアウト機能は無効化
-            .logout(logout -> logout.disable());
+public SecurityFilterChain filterChain(HttpSecurity http, OAuth2AuthorizationRequestResolver pkceResolver)
+    throws Exception {
+    http
+        .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+        .csrf(csrf -> csrf.disable())
+        .authorizeHttpRequests(
+            authz -> authz
+                .requestMatchers(
+                    "/bff/auth/health",       // ヘルスチェック - 監視システムからアクセス
+                    "/bff/auth/logout",       // ログアウト - セッション無効化後も正常レスポンス
+                    "/oauth2/**",             // OAuth2認証開始 - Spring Security標準パス
+                    "/bff/login/oauth2/**",   // Keycloakコールバック - OAuth2認証完了後のリダイレクト
+                    "/.well-known/**"         // OpenID Connect設定情報 - メタデータエンドポイント
+                )
+                .permitAll()
+                .anyRequest()
+                .authenticated()
+        )
+        .oauth2Login(
+            oauth2 -> oauth2
+                .authorizationEndpoint(
+                    authz -> authz
+                        .authorizationRequestResolver(pkceResolver)
+                )
+                .redirectionEndpoint(
+                    redirection -> redirection
+                        .baseUri("/bff/login/oauth2/code/*")
+                )
+                .successHandler(authenticationSuccessHandler())
+        )
+        // ログアウトはカスタムエンドポイント(/bff/auth/logout)で処理するため
+        // Spring Security標準のログアウト機能は無効化
+        .logout(logout -> logout.disable());
 
-        return http.build();
-    }
+    return http.build();
+}
 
     @Bean
-    public AuthenticationSuccessHandler authenticationSuccessHandler() {
-        return (request, response, authentication) -> {
-            // OAuth2認証成功後の処理
-            String redirectUrl = "/bff/auth/login";
+public AuthenticationSuccessHandler authenticationSuccessHandler() {
+    return (request, response, authentication) -> {
+        // OAuth2認証成功後、フロントエンドにリダイレクト
+        String redirectUrl = "http://localhost:5173/auth-callback";
 
-            // continueパラメータがある場合はそれを保持
-            String continueParam = request.getParameter("continue");
-            if (continueParam != null && !continueParam.isEmpty()) {
-                redirectUrl += "?continue=" + continueParam;
-            }
+        // continueパラメータがある場合はそれを使用
+        String continueParam = request.getParameter("continue");
+        if (continueParam != null && !continueParam.isEmpty()) {
+            redirectUrl = continueParam;
+        }
 
-            response.sendRedirect(redirectUrl);
-        };
-    }
+        // ログ追加：リダイレクト前の状態を確認
+        System.out.println("🔹 AuthenticationSuccessHandler executed");
+        System.out.println("🔹 Redirecting to: " + redirectUrl);
+        System.out.println("🔹 User: " + authentication.getName());
+
+        response.sendRedirect(redirectUrl);
+    };
+}
 
     @Bean
     public OAuth2AuthorizedClientRepository authorizedClientRepository(
@@ -83,7 +94,13 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOriginPatterns(Arrays.asList("http://app.example.com*", "http://localhost:*"));
+        configuration.setAllowedOriginPatterns(
+            Arrays.asList(
+                "http://app.example.com*",
+                "http://localhost:*",
+                "http://localhost:5173" // 明示的に追加
+            )
+        );
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(Arrays.asList("*"));
         configuration.setAllowCredentials(true);

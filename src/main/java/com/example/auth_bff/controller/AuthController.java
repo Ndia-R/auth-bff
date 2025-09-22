@@ -18,6 +18,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 
+import java.io.IOException;
+
 import java.util.HashMap;
 import java.util.Map;
 
@@ -29,16 +31,37 @@ public class AuthController {
     private final AuthService authService;
 
     @GetMapping("/login")
-    public ResponseEntity<AccessTokenResponse> login(@AuthenticationPrincipal OAuth2User principal) {
+    public void startLogin(
+        HttpServletRequest request,
+        HttpServletResponse response,
+        @AuthenticationPrincipal OAuth2User principal
+    ) throws IOException {
+
+        // AuthServiceで厳密な認証チェック
+        boolean isAuthenticated = authService.isUserAuthenticated(principal, request.getSession(false));
+
+        if (isAuthenticated) {
+            // 既にログイン済みの場合、直接フロントエンドにリダイレクト
+            response.sendRedirect("http://localhost:5173/auth-callback");
+        } else {
+            // 未認証の場合、OAuth2認証フローを開始
+            response.sendRedirect("/oauth2/authorization/keycloak");
+        }
+    }
+
+    @GetMapping("/token")
+    public ResponseEntity<AccessTokenResponse> getToken(@AuthenticationPrincipal OAuth2User principal) {
+        // 認証済みの場合のみアクセストークンを返却
         AccessTokenResponse response = authService.getAccessToken(principal);
         return ResponseEntity.ok(response);
     }
 
     @PostMapping("/logout")
     public ResponseEntity<Map<String, String>> logout(
-            HttpServletRequest request,
-            HttpServletResponse response,
-            @AuthenticationPrincipal OAuth2User principal) {
+        HttpServletRequest request,
+        HttpServletResponse response,
+        @AuthenticationPrincipal OAuth2User principal
+    ) {
 
         String username = (principal != null) ? principal.getName() : "anonymous";
         boolean wasAuthenticated = (principal != null);
@@ -55,12 +78,12 @@ public class AuthController {
         // セキュリティコンテキストクリア
         SecurityContextHolder.clearContext();
 
-        // クッキー削除
-        Cookie sessionCookie = new Cookie("BFFSESSIONID", null);
-        sessionCookie.setPath("/");
-        sessionCookie.setHttpOnly(true);
-        sessionCookie.setMaxAge(0);
-        response.addCookie(sessionCookie);
+        // セッションクッキー削除
+        Cookie bffSessionCookie = new Cookie("BFFSESSIONID", null);
+        bffSessionCookie.setPath("/");
+        bffSessionCookie.setHttpOnly(true);
+        bffSessionCookie.setMaxAge(0);
+        response.addCookie(bffSessionCookie);
 
         Map<String, String> result = new HashMap<>();
         result.put("message", "Logged out successfully");

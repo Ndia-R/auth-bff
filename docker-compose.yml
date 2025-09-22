@@ -27,12 +27,16 @@ services:
     depends_on:
       - redis
       - keycloak
+    networks:
+      - shared-network
     command: sleep infinity
 
   redis:
     image: redis:8.2
     ports:
       - 6379:6379
+    networks:
+      - shared-network
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.3.3
@@ -57,6 +61,8 @@ services:
     volumes:
       - ./realm-export.json:/opt/keycloak/data/import/realm-export.json
       - keycloak-data:/opt/keycloak/data
+    networks:
+      - shared-network
     command: start-dev --import-realm
 
 volumes:
@@ -66,3 +72,7 @@ volumes:
   claude-config:      # Claude設定・認証情報
   claude-history:     # コマンド履歴
   claude-npm-global:  # npmグローバルパッケージ
+
+networks:
+  shared-network:
+    external: true

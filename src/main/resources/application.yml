@@ -42,18 +42,19 @@ spring:
     redis:
       flush-mode: on_save
       namespace: spring:session
-    cookie:
-      name: BFFSESSIONID
-      http-only: true
-      secure: ${COOKIE_SECURE:false}
-      same-site: lax
-      max-age: 1800
 
 # Server Configuration
 server:
   port: 8080
   servlet:
     context-path: /
+    session:
+      cookie:
+        name: BFFSESSIONID
+        http-only: true
+        secure: ${COOKIE_SECURE:false}
+        same-site: lax
+        max-age: 1800
 
 # Logging Configuration
 logging:

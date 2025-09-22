@@ -15,10 +15,13 @@ spring:
             redirect-uri: ${KEYCLOAK_REDIRECT_URI}
         provider:
           keycloak:
-            authorization-uri: http://localhost:8180/realms/test-user-realm/protocol/openid-connect/auth
-            token-uri: http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/token
-            jwk-set-uri: http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/certs
             user-name-attribute: preferred_username
+            # 本番環境の場合は、以下のissuer-uriだけにして
+            # 他のauthorization-uri、token-uri、jwk-set-uriはコメントアウトまたは削除してください
+            # issuer-uri: ${KEYCLOAK_ISSUER_URI}
+            authorization-uri: ${KEYCLOAK_AUTHORIZE_URI}
+            token-uri: ${KEYCLOAK_TOKEN_URI}
+            jwk-set-uri: ${KEYCLOAK_JWK_URI}
 
   # Redis Configuration for Session Storage
   data:

@@ -9,18 +9,14 @@ services:
       # Keycloak Configuration
       KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID}
       KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET}
-      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI}
       KEYCLOAK_REDIRECT_URI: ${KEYCLOAK_REDIRECT_URI}
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI}
+      KEYCLOAK_AUTHORIZE_URI: ${KEYCLOAK_AUTHORIZE_URI}
+      KEYCLOAK_TOKEN_URI: ${KEYCLOAK_TOKEN_URI}
+      KEYCLOAK_JWK_URI: ${KEYCLOAK_JWK_URI}
       # Redis Configuration
       REDIS_HOST: ${REDIS_HOST}
       REDIS_PORT: ${REDIS_PORT}
-      # BFF Configuration
-      BFF_BASE_URL: ${BFF_BASE_URL}
-      API_BASE_URL: ${API_BASE_URL}
-      # Security Configuration
-      COOKIE_SECURE: ${COOKIE_SECURE}
-      COOKIE_SAME_SITE: ${COOKIE_SAME_SITE}
-      SESSION_TIMEOUT: ${SESSION_TIMEOUT}
     volumes:
       - .:/workspace
       - gradle-cache:/home/vscode/.gradle
@@ -49,15 +45,15 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
       # 開発用ファイルベースDB
       KC_DB: dev-file
-      # issuer統一のためのホスト名設定（重要）
-      KC_HOSTNAME: localhost          # ← 外向きに変更
-      KC_HOSTNAME_PORT: 8180          # ← 外向きポート
       # 開発環境用の緩和設定
       KC_HOSTNAME_STRICT: false
       KC_HOSTNAME_STRICT_HTTPS: false
       KC_HTTP_ENABLED: true
-
+      # issuer統一のためのホスト名設定
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_PORT: 8180
       KEYCLOAK_FRONTEND_URL: http://localhost:8180
+
     volumes:
       - ./realm-export.json:/opt/keycloak/data/import/realm-export.json
       - keycloak-data:/opt/keycloak/data

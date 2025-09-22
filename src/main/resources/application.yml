@@ -15,11 +15,9 @@ spring:
             redirect-uri: ${KEYCLOAK_REDIRECT_URI}
         provider:
           keycloak:
-            issuer-uri: ${KEYCLOAK_ISSUER_URI}
-            authorization-uri: ${KEYCLOAK_AUTHORIZATION_URI}
-            token-uri: ${KEYCLOAK_TOKEN_URI}
-            user-info-uri: ${KEYCLOAK_USERINFO_URI}
-            jwk-set-uri: ${KEYCLOAK_JWK_SET_URI}
+            authorization-uri: http://localhost:8180/realms/test-user-realm/protocol/openid-connect/auth
+            token-uri: http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/token
+            jwk-set-uri: http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/certs
             user-name-attribute: preferred_username
 
   # Redis Configuration for Session Storage
@@ -44,7 +42,7 @@ spring:
     cookie:
       name: BFFSESSIONID
       http-only: true
-      secure: true
+      secure: ${COOKIE_SECURE:false}
       same-site: lax
       max-age: 1800
 
@@ -53,11 +51,6 @@ server:
   port: 8080
   servlet:
     context-path: /
-    session:
-      cookie:
-        http-only: true
-        secure: true
-        same-site: lax
 
 # Logging Configuration
 logging:
@@ -66,6 +59,16 @@ logging:
     org.springframework.security.oauth2: DEBUG
     org.springframework.session: DEBUG
     com.example.auth_bff: DEBUG
+    # HTTP通信の詳細ログ
+    # org.springframework.web.client.RestTemplate: DEBUG
+    org.springframework.http.client: DEBUG
+    org.apache.http: DEBUG
+    # HTTPリクエストヘッダーの詳細表示
+    org.springframework.web.client.RestTemplate: TRACE
+    org.springframework.http.client.support: TRACE
+    # OAuth2プロバイダーの詳細ログ
+    org.springframework.security.oauth2.client.userinfo: DEBUG
+    org.springframework.security.oauth2.core: DEBUG
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
 

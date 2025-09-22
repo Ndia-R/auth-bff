@@ -33,6 +33,7 @@
         "pkce.code.challenge.method": "S256"
       },
       "defaultClientScopes": [
+        "openid",
         "web-origins",
         "profile",
         "roles",

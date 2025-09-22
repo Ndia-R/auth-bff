@@ -27,7 +27,15 @@
       "Bash(netstat:*)",
       "Bash(ss:*)",
       "Bash(ping:*)",
-      "Bash(KEYCLOAK_ISSUER_URI=http://keycloak:8080/realms/test-user-realm KEYCLOAK_REDIRECT_URI=http://localhost:8888/bff/login/oauth2/code/keycloak REDIS_HOST=redis REDIS_PORT=6379 ./gradlew bootRun)"
+      "Bash(KEYCLOAK_ISSUER_URI=http://keycloak:8080/realms/test-user-realm KEYCLOAK_REDIRECT_URI=http://localhost:8888/bff/login/oauth2/code/keycloak REDIS_HOST=redis REDIS_PORT=6379 ./gradlew bootRun)",
+      "mcp__serena__insert_after_symbol",
+      "mcp__serena__replace_symbol_body",
+      "mcp__serena__insert_before_symbol",
+      "Bash(lsof:*)",
+      "mcp__serena__find_symbol",
+      "mcp__serena__get_symbols_overview",
+      "mcp__serena__list_memories",
+      "mcp__serena__read_memory"
     ],
     "deny": [],
     "ask": []

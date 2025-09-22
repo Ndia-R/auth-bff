@@ -10,34 +10,44 @@ import org.springframework.security.oauth2.client.web.AuthenticatedPrincipalOAut
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
-import org.springframework.security.web.authentication.SimpleUrlAuthenticationSuccessHandler;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.util.Arrays;
 
+import org.springframework.security.oauth2.client.web.DefaultOAuth2AuthorizationRequestResolver;
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestCustomizers;
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestResolver;
+
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain filterChain(HttpSecurity http, OAuth2AuthorizationRequestResolver pkceResolver)
+        throws Exception {
         http
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(
                 authz -> authz
-                    .requestMatchers("/bff/auth/health")
+                    .requestMatchers("/bff/auth/health", "/oauth2/**", "/login/oauth2/**", "/bff/login/oauth2/**")
                     .permitAll()
                     .anyRequest()
                     .authenticated()
             )
             .oauth2Login(
                 oauth2 -> oauth2
-                    .loginPage("/oauth2/authorization/keycloak")
+                    .authorizationEndpoint(
+                        authz -> authz
+                            .authorizationRequestResolver(pkceResolver)
+                    )
+                    .redirectionEndpoint(
+                        redirection -> redirection
+                            .baseUri("/bff/login/oauth2/code/*")
+                    )
                     .successHandler(authenticationSuccessHandler())
-                    .defaultSuccessUrl("/bff/auth/login", true)
             )
             .logout(
                 logout -> logout
@@ -52,10 +62,18 @@ public class SecurityConfig {
 
     @Bean
     public AuthenticationSuccessHandler authenticationSuccessHandler() {
-        SimpleUrlAuthenticationSuccessHandler handler = new SimpleUrlAuthenticationSuccessHandler();
-        handler.setDefaultTargetUrl("/bff/auth/login");
-        handler.setAlwaysUseDefaultTargetUrl(true);
-        return handler;
+        return (request, response, authentication) -> {
+            // OAuth2認証成功後の処理
+            String redirectUrl = "/bff/auth/login";
+
+            // continueパラメータがある場合はそれを保持
+            String continueParam = request.getParameter("continue");
+            if (continueParam != null && !continueParam.isEmpty()) {
+                redirectUrl += "?continue=" + continueParam;
+            }
+
+            response.sendRedirect(redirectUrl);
+        };
     }
 
     @Bean
@@ -78,4 +96,17 @@ public class SecurityConfig {
         source.registerCorsConfiguration("/**", configuration);
         return source;
     }
+
+    @Bean
+    public OAuth2AuthorizationRequestResolver pkceResolver(ClientRegistrationRepository clientRegistrationRepository) {
+        DefaultOAuth2AuthorizationRequestResolver authorizationRequestResolver = new DefaultOAuth2AuthorizationRequestResolver(
+            clientRegistrationRepository,
+            "/oauth2/authorization"
+        );
+        authorizationRequestResolver.setAuthorizationRequestCustomizer(
+            OAuth2AuthorizationRequestCustomizers.withPkce()
+        );
+        return authorizationRequestResolver;
+    }
+
 }

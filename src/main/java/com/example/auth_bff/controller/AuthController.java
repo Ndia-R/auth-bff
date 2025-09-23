@@ -1,6 +1,8 @@
 package com.example.auth_bff.controller;
 
 import com.example.auth_bff.dto.AccessTokenResponse;
+import com.example.auth_bff.dto.HealthResponse;
+import com.example.auth_bff.dto.LogoutResponse;
 import com.example.auth_bff.dto.UserResponse;
 import com.example.auth_bff.service.AuthService;
 import lombok.RequiredArgsConstructor;
@@ -9,19 +11,14 @@ import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.context.SecurityContextHolder;
 
-import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import jakarta.servlet.http.HttpSession;
 
 import java.io.IOException;
-
-import java.util.HashMap;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/bff/auth")
@@ -57,39 +54,14 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<Map<String, String>> logout(
+    public ResponseEntity<LogoutResponse> logout(
         HttpServletRequest request,
         HttpServletResponse response,
-        @AuthenticationPrincipal OAuth2User principal
+        @AuthenticationPrincipal OAuth2User principal,
+        @RequestParam(value = "complete", defaultValue = "false") boolean complete
     ) {
-
-        String username = (principal != null) ? principal.getName() : "anonymous";
-        boolean wasAuthenticated = (principal != null);
-
-        // セッション無効化
-        HttpSession session = request.getSession(false);
-        if (session != null) {
-            session.invalidate();
-            System.out.println("Session invalidated for user: " + username);
-        } else {
-            System.out.println("No active session found for user: " + username);
-        }
-
-        // セキュリティコンテキストクリア
-        SecurityContextHolder.clearContext();
-
-        // セッションクッキー削除
-        Cookie bffSessionCookie = new Cookie("BFFSESSIONID", null);
-        bffSessionCookie.setPath("/");
-        bffSessionCookie.setHttpOnly(true);
-        bffSessionCookie.setMaxAge(0);
-        response.addCookie(bffSessionCookie);
-
-        Map<String, String> result = new HashMap<>();
-        result.put("message", "Logged out successfully");
-        result.put("user", username);
-        result.put("wasAuthenticated", String.valueOf(wasAuthenticated));
-        return ResponseEntity.ok(result);
+        LogoutResponse logoutResponse = authService.logout(request, response, principal, complete);
+        return ResponseEntity.ok(logoutResponse);
     }
 
     @GetMapping("/user")
@@ -105,10 +77,8 @@ public class AuthController {
     }
 
     @GetMapping("/health")
-    public ResponseEntity<Map<String, String>> health() {
-        Map<String, String> status = new HashMap<>();
-        status.put("status", "UP");
-        status.put("service", "auth-bff");
-        return ResponseEntity.ok(status);
+    public ResponseEntity<HealthResponse> health() {
+        HealthResponse response = new HealthResponse("UP", "auth-bff");
+        return ResponseEntity.ok(response);
     }
 }

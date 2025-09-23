@@ -76,6 +76,11 @@ logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
 
+# Keycloak Configuration
+keycloak:
+  logout-uri: ${KEYCLOAK_LOGOUT_URI:http://localhost:8180/realms/test-user-realm/protocol/openid-connect/logout}
+  post-logout-redirect-uri: ${POST_LOGOUT_REDIRECT_URI:http://localhost:5173}
+
 # Management and Actuator
 management:
   endpoints:

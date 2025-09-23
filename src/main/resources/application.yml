@@ -78,8 +78,7 @@ logging:
 
 # Keycloak Configuration
 keycloak:
-  logout-uri: ${KEYCLOAK_LOGOUT_URI:http://localhost:8180/realms/test-user-realm/protocol/openid-connect/logout}
-  post-logout-redirect-uri: ${POST_LOGOUT_REDIRECT_URI:http://localhost:5173}
+  logout-uri: ${KEYCLOAK_LOGOUT_URI:http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/logout}
 
 # Management and Actuator
 management:

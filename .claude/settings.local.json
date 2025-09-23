@@ -35,7 +35,9 @@
       "mcp__serena__find_symbol",
       "mcp__serena__get_symbols_overview",
       "mcp__serena__list_memories",
-      "mcp__serena__read_memory"
+      "mcp__serena__read_memory",
+      "WebSearch",
+      "Bash(KEYCLOAK_CLIENT_ID=my-books-client KEYCLOAK_CLIENT_SECRET=your-client-secret KEYCLOAK_REDIRECT_URI=http://localhost:8888/bff/login/oauth2/code/keycloak KEYCLOAK_LOGOUT_URI=http://localhost:8180/realms/test-user-realm/protocol/openid-connect/logout KEYCLOAK_AUTHORIZE_URI=http://localhost:8180/realms/test-user-realm/protocol/openid-connect/auth KEYCLOAK_TOKEN_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/token KEYCLOAK_JWK_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/certs REDIS_HOST=redis REDIS_PORT=6379 ./gradlew bootRun)"
     ],
     "deny": [],
     "ask": []

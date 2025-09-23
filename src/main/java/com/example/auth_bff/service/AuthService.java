@@ -10,8 +10,11 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.core.OAuth2AccessToken;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.oauth2.core.user.OAuth2User;
+import org.springframework.security.oauth2.core.oidc.user.OidcUser;
+import org.springframework.web.util.UriComponentsBuilder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
@@ -28,6 +31,12 @@ public class AuthService {
 
     @Value("${keycloak.logout-uri}")
     private String keycloakLogoutUri;
+
+    @Value("${spring.security.oauth2.client.registration.keycloak.client-id}")
+    private String clientId;
+
+    @Value("${spring.security.oauth2.client.registration.keycloak.client-secret}")
+    private String clientSecret;
 
     // ===========================================
     // 公開メソッド（エントリーポイント）
@@ -49,6 +58,8 @@ public class AuthService {
     ) {
         String username = (principal != null) ? principal.getName() : "anonymous";
 
+        log.info("Starting logout process - User: {}, Complete: {}", username, complete);
+
         // BFFセッション関連のクリア
         invalidateSession(request, username);
         clearSecurityContext();
@@ -56,10 +67,13 @@ public class AuthService {
 
         // Keycloakログアウト処理（完全ログアウト時のみ）
         if (complete) {
-            processKeycloakLogout();
+            log.info("Complete logout requested - processing Keycloak logout for user: {}", username);
+            processKeycloakLogout(principal);
+        } else {
+            log.info("Normal logout (BFF only) for user: {}", username);
         }
 
-        log.info("Logout completed. Complete: {}, User: {}", complete, username);
+        log.info("Logout completed for user: {}", username);
 
         return new LogoutResponse("success");
     }
@@ -192,25 +206,76 @@ public class AuthService {
     }
 
     /**
-    * Keycloakログアウト処理を実行する
-    */
-    private void processKeycloakLogout() {
-        try {
-            // WebClientでKeycloakログアウトエンドポイントを呼び出し
-            String response = webClient.get()
-                .uri(keycloakLogoutUri)
-                .retrieve()
-                .bodyToMono(String.class)
-                .block(); // 同期処理に変換
+     * Keycloakログアウト処理を実行する（OpenID Connect RP-Initiated Logout方式）
+     * @param principal 認証済みユーザー情報
+     */
+    private void processKeycloakLogout(OAuth2User principal) {
+        log.info("Starting Keycloak logout process using OpenID Connect RP-Initiated Logout");
 
-            log.info("Keycloak logout completed successfully");
-            log.debug("Successfully called Keycloak logout endpoint: {}", keycloakLogoutUri);
-            log.trace("Keycloak logout response: {}", response);
+        try {
+            String principalName = extractPrincipalName(principal);
+
+            // OidcUserでない場合はスキップ
+            if (!(principal instanceof OidcUser)) {
+                log.warn("Principal is not an OidcUser, skipping Keycloak logout for user: {}", principalName);
+                return;
+            }
+
+            OidcUser oidcUser = (OidcUser) principal;
+            String idToken = oidcUser.getIdToken().getTokenValue();
+            if (idToken == null) {
+                log.warn("No ID token found for user: {}, skipping Keycloak logout", principalName);
+                return;
+            }
+
+            log.debug("Keycloak logout URI: {}", keycloakLogoutUri);
+
+            // OpenID Connect End Session Endpointを使用してログアウトURLを構築
+            String endSessionUrl = UriComponentsBuilder
+                .fromUriString(keycloakLogoutUri)
+                .queryParam("id_token_hint", idToken)
+                .build()
+                .toUriString();
+
+            log.info("Calling Keycloak end session endpoint for user: {}", principalName);
+            log.debug("End session URL: {}", endSessionUrl);
+
+            // GETリクエストでKeycloakログアウト（OpenID Connect仕様準拠）
+            webClient.get()
+                .uri(endSessionUrl)
+                .exchangeToMono(clientResponse -> {
+                    if (clientResponse.statusCode().is2xxSuccessful() ||
+                        clientResponse.statusCode().is3xxRedirection()) {
+                        log.info("Keycloak logout successful with status: {}", clientResponse.statusCode());
+                        return clientResponse.bodyToMono(String.class);
+                    } else {
+                        log.error("Keycloak logout failed with status: {}", clientResponse.statusCode());
+                        return clientResponse.bodyToMono(String.class)
+                            .doOnNext(errorBody -> {
+                                log.error("Keycloak error response body: {}", errorBody);
+                                log.error("Response headers: {}", clientResponse.headers().asHttpHeaders());
+                            })
+                            .then(
+                                Mono.error(
+                                    new RuntimeException(
+                                        "Keycloak logout failed with " + clientResponse.statusCode()
+                                            + ". Check logs for details."
+                                    )
+                                )
+                            );
+                    }
+                })
+                .block();
+
+            log.info("Keycloak session invalidated successfully for user: {}", principalName);
+
         } catch (Exception e) {
-            log.warn("Failed to call Keycloak logout endpoint: {}", e.getMessage());
-            log.error("Error calling Keycloak logout endpoint: {}", keycloakLogoutUri, e);
+            log.error("Failed to invalidate Keycloak session: {}", e.getMessage());
+            log.error("Error calling Keycloak logout endpoint", e);
             // Keycloakログアウトが失敗してもBFFログアウトは継続
         }
+
+        log.info("Keycloak logout process completed");
     }
 
     /**

@@ -35,11 +35,13 @@ KeycloakとのOAuth2認証フローを処理するSpring BootのBFF (Backend for
 
 | メソッド | パス | 説明 | レスポンス |
 |---------|------|------|-----------|
-| GET | `/bff/auth/login` | 認証状態確認・トークン取得 | `AccessTokenResponse` |
+| GET | `/bff/auth/login` | 認証状態確認・OAuth2フロー開始 | リダイレクト |
+| GET | `/bff/auth/token` | アクセストークン取得 | `AccessTokenResponse` |
 | POST | `/bff/auth/refresh` | アクセストークンリフレッシュ | `AccessTokenResponse` |
 | GET | `/bff/auth/user` | 現在のユーザー情報取得 | `UserResponse` |
-| POST | `/bff/auth/logout` | ログアウト・セッションクリア | `{"message": "success"}` |
-| GET | `/bff/auth/health` | ヘルスチェック | `{"status": "UP"}` |
+| POST | `/bff/auth/logout` | ログアウト・セッションクリア | `LogoutResponse` |
+| POST | `/bff/auth/logout?complete=true` | 完全ログアウト（Keycloakセッションも無効化） | `LogoutResponse` |
+| GET | `/bff/auth/health` | ヘルスチェック | `HealthResponse` |
 
 ## DTOクラス
 
@@ -58,6 +60,26 @@ KeycloakとのOAuth2認証フローを処理するSpring BootのBFF (Backend for
   "name": "田中太郎",
   "email": "tanaka@example.com",
   "preferred_username": "tanaka"
+}
+```
+
+### LogoutResponse
+通常ログアウトと完全ログアウトの両方で同じレスポンス形式を返します。
+```json
+{
+  "message": "success"
+}
+```
+
+**ログアウトの種類:**
+- **通常ログアウト** (`complete=false` または省略): BFFセッションのみクリア
+- **完全ログアウト** (`complete=true`): BFFセッション + Keycloakセッションをクリア
+
+### HealthResponse
+```json
+{
+  "status": "UP",
+  "service": "auth-bff"
 }
 ```
 
@@ -205,7 +227,45 @@ docker compose up redis -d
    - Redis接続確認
    - Cookie設定（Secure属性）確認
 
-4. **🔥 DevContainer環境でのKeycloak接続エラー**
+4. **🔥 完全ログアウト後も再認証が発生しない**
+
+   **症状**: 完全ログアウト(`complete=true`)後の再ログインでKeycloak認証画面が表示されない
+
+   **原因**: Keycloakセッションが実際には無効化されていない
+   ```java
+   // 問題のある実装
+   private void processKeycloakLogout() {
+       // 単純にログアウト画面のHTMLを取得するだけ
+       webClient.get().uri(keycloakLogoutUri).retrieve()...
+   }
+   ```
+
+   **解決方法**: OpenID Connect RP-Initiated Logoutを使用
+   ```java
+   // 正しい実装
+   private void processKeycloakLogout(OAuth2User principal) {
+       if (principal instanceof OidcUser) {
+           String idToken = ((OidcUser) principal).getIdToken().getTokenValue();
+           String endSessionUrl = UriComponentsBuilder
+               .fromUriString(keycloakLogoutUri)
+               .queryParam("id_token_hint", idToken)  // 重要: ユーザー識別
+               .queryParam("post_logout_redirect_uri", postLogoutRedirectUri)
+               .build().toUriString();
+           webClient.get().uri(endSessionUrl).retrieve()...
+       }
+   }
+   ```
+
+   **確認方法**:
+   ```bash
+   # ログでエンドセッションURLを確認
+   tail -f logs/application.log | grep "end session endpoint"
+
+   # 完全ログアウト後にKeycloakに直接アクセスして確認
+   curl -v http://localhost:8180/realms/test-user-realm/account
+   ```
+
+5. **🔥 DevContainer環境でのKeycloak接続エラー**
 
    **症状**: `Unable to resolve Configuration with the provided Issuer of "http://localhost:8180/realms/test-user-realm"`
 
@@ -247,7 +307,7 @@ docker compose up redis -d
    ./gradlew bootRun
    ```
 
-5. **🔥 OAuth2ネットワーク分離問題（重要）**
+6. **🔥 OAuth2ネットワーク分離問題（重要）**
 
    **症状**: ブラウザで「このサイトにアクセスできません」、ログに`http://keycloak:8080`へのリダイレクト
 
@@ -324,7 +384,68 @@ docker compose up redis -d
 
 ### 🔥 新機能・改善点
 
-6. **PKCE (Proof Key for Code Exchange) 対応**
+6. **ログアウト機能の強化**
+
+   **機能**: 通常ログアウトと完全ログアウトの2段階対応
+   - **通常ログアウト** (`complete=false`): BFFアプリケーションのセッションのみクリア
+     - ユーザーがBFFアプリから離れたい場合
+     - 他のKeycloakアプリケーションは継続利用可能
+   - **完全ログアウト** (`complete=true`): BFFセッション + Keycloakセッションを完全クリア
+     - セキュリティ要件が高い場合（共用端末等）
+     - 全てのKeycloakアプリケーションからログアウト
+
+   ```java
+   // AuthService.java - ログアウト処理
+   public LogoutResponse logout(HttpServletRequest request, HttpServletResponse response,
+                               OAuth2User principal, boolean complete) {
+       // BFFセッション関連のクリア（常に実行）
+       invalidateSession(request, username);
+       clearSecurityContext();
+       clearSessionCookie(response);
+
+       // Keycloakログアウト処理（完全ログアウト時のみ）
+       if (complete) {
+           processKeycloakLogout(principal);  // ← OAuth2Userを渡すように修正
+       }
+
+       return new LogoutResponse("success");
+   }
+   ```
+
+   **🔧 Keycloakログアウト処理の改善** (OpenID Connect RP-Initiated Logout対応)
+   ```java
+   // 修正前: 問題のある実装
+   private void processKeycloakLogout() {
+       // 単純にログアウト画面のHTMLを取得するだけ（セッション無効化されない）
+       webClient.get().uri(keycloakLogoutUri).retrieve()...
+   }
+
+   // 修正後: 正しい実装
+   private void processKeycloakLogout(OAuth2User principal) {
+       if (principal instanceof OidcUser) {
+           OidcUser oidcUser = (OidcUser) principal;
+           String idToken = oidcUser.getIdToken().getTokenValue();
+
+           // OpenID Connect End Session Endpointを使用
+           String endSessionUrl = UriComponentsBuilder
+               .fromUriString(keycloakLogoutUri)
+               .queryParam("id_token_hint", idToken)           // ユーザー識別・自動ログアウト
+               .queryParam("post_logout_redirect_uri", postLogoutRedirectUri)
+               .build()
+               .toUriString();
+
+           webClient.get().uri(endSessionUrl).retrieve()...   // 確実なセッション無効化
+       }
+   }
+   ```
+
+   **改善効果:**
+   - ✅ **確実なKeycloakセッション無効化**: ID Tokenによるユーザー識別
+   - ✅ **自動ログアウト**: 確認画面をスキップして直接ログアウト実行
+   - ✅ **OpenID Connect仕様準拠**: 標準的なRP-Initiated Logout実装
+   - ✅ **再認証の保証**: 完全ログアウト後は必ずKeycloak認証画面が表示
+
+7. **PKCE (Proof Key for Code Exchange) 対応**
 
    **機能**: より安全なOAuth2認証フロー
    ```java
@@ -360,7 +481,33 @@ docker compose up redis -d
        org.springframework.web.client.RestTemplate: TRACE
    ```
 
-9. **Keycloak設定の自動化**
+9. **OpenID Connect RP-Initiated Logout対応**
+
+   **機能**: 標準準拠のKeycloakプログラマティックログアウト
+   - **従来の問題**: ログアウト画面のHTMLを取得するだけでセッション無効化されない
+   - **改善後**: ID Token Hintを使用した確実なセッション無効化
+   - **OpenID Connect仕様準拠**: [RFC準拠](https://openid.net/specs/openid-connect-rpinitiated-1_0.html)の実装
+   - **管理用API不要**: 認証済みユーザーの情報のみでログアウト可能
+
+   ```java
+   // 実装のポイント
+   @Value("${keycloak.post-logout-redirect-uri}")
+   private String postLogoutRedirectUri;
+
+   private void processKeycloakLogout(OAuth2User principal) {
+       if (principal instanceof OidcUser) {
+           String idToken = ((OidcUser) principal).getIdToken().getTokenValue();
+           String endSessionUrl = UriComponentsBuilder
+               .fromUriString(keycloakLogoutUri)
+               .queryParam("id_token_hint", idToken)
+               .queryParam("post_logout_redirect_uri", postLogoutRedirectUri)
+               .build().toUriString();
+           // 確実なセッション無効化を実行
+       }
+   }
+   ```
+
+10. **Keycloak設定の自動化**
 
    **機能**: `realm-export.json`による設定管理
    - クライアント設定、ユーザー、ロール等を含む
@@ -381,7 +528,11 @@ tail -f logs/application.log | grep ERROR
 ### 認証フロー
 ```javascript
 // 1. ログイン開始（未認証の場合Keycloakにリダイレクト）
-fetch('/bff/auth/login')
+// /bff/auth/loginは認証状態をチェックし、適切にリダイレクトします
+window.location.href = '/bff/auth/login';
+
+// 2. アクセストークン取得（認証後）
+fetch('/bff/auth/token')
   .then(response => response.json())
   .then(data => {
     // アクセストークンを取得
@@ -395,15 +546,27 @@ fetch('/bff/auth/login')
     });
   });
 
-// 2. トークンリフレッシュ
+// 3. トークンリフレッシュ
 fetch('/bff/auth/refresh', { method: 'POST' })
   .then(response => response.json())
   .then(data => {
     const newToken = data.access_token;
   });
 
-// 3. ログアウト
-fetch('/bff/auth/logout', { method: 'POST' });
+// 4. ログアウト
+// 通常ログアウト（BFFセッションのみクリア）
+fetch('/bff/auth/logout', { method: 'POST' })
+  .then(response => response.json())
+  .then(data => {
+    console.log(data.message); // "success"
+  });
+
+// 完全ログアウト（BFFセッション + Keycloakセッションクリア）
+fetch('/bff/auth/logout?complete=true', { method: 'POST' })
+  .then(response => response.json())
+  .then(data => {
+    console.log(data.message); // "success"
+  });
 ```
 
 ---

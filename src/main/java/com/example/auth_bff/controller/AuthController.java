@@ -1,7 +1,6 @@
 package com.example.auth_bff.controller;
 
 import com.example.auth_bff.dto.AccessTokenResponse;
-import com.example.auth_bff.dto.HealthResponse;
 import com.example.auth_bff.dto.LogoutResponse;
 import com.example.auth_bff.dto.UserResponse;
 import com.example.auth_bff.service.AuthService;
@@ -73,12 +72,6 @@ public class AuthController {
     @PostMapping("/refresh")
     public ResponseEntity<AccessTokenResponse> refresh(@AuthenticationPrincipal OAuth2User principal) {
         AccessTokenResponse response = authService.refreshAccessToken(principal);
-        return ResponseEntity.ok(response);
-    }
-
-    @GetMapping("/health")
-    public ResponseEntity<HealthResponse> health() {
-        HealthResponse response = new HealthResponse("UP", "auth-bff");
         return ResponseEntity.ok(response);
     }
 }

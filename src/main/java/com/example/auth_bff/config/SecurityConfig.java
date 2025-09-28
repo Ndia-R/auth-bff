@@ -33,7 +33,7 @@ public SecurityFilterChain filterChain(HttpSecurity http, OAuth2AuthorizationReq
         .authorizeHttpRequests(
             authz -> authz
                 .requestMatchers(
-                    "/bff/auth/health",       // ヘルスチェック - 監視システムからアクセス
+                    "/actuator/health",       // ヘルスチェック - 監視システムからアクセス
                     "/bff/auth/logout",       // ログアウト - セッション無効化後も正常レスポンス
                     "/oauth2/**",             // OAuth2認証開始 - Spring Security標準パス
                     "/bff/login/oauth2/**",   // Keycloakコールバック - OAuth2認証完了後のリダイレクト

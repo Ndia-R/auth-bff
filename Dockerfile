@@ -1,15 +1,18 @@
-FROM eclipse-temurin:17-jdk-jammy
+# ====================================
+# 開発環境ステージ
+# ====================================
+FROM eclipse-temurin:17-jdk-jammy AS development
 
 RUN apt-get update && \
     apt-get install -y git curl sudo bash python3 python3-pip && \
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
 # 既存ユーザーがいないので、新規作成
 RUN useradd -m vscode
 
-# rootユーザーで必要なディレクトリを作成・権限設定
+# rootユーザーで作業ディレクトリの所有者とグループを変更
 USER root
 WORKDIR /workspace
 RUN chown vscode:vscode /workspace
@@ -25,7 +28,8 @@ USER vscode
 
 # .gradleディレクトリはvolumeとしてバインドするので
 # そのためのディレクトリをあらかじめ作成しておく
-RUN mkdir -p /home/vscode/.gradle
+RUN mkdir -p /home/vscode/.gradle && \
+    chown -R vscode:vscode /home/vscode/.gradle
 
 # vscodeユーザー用のnpmグローバルディレクトリを設定
 RUN mkdir ~/.npm-global && \

@@ -41,7 +41,7 @@ KeycloakとのOAuth2認証フローを処理するSpring BootのBFF (Backend for
 | GET | `/bff/auth/user` | 現在のユーザー情報取得 | `UserResponse` |
 | POST | `/bff/auth/logout` | ログアウト・セッションクリア | `LogoutResponse` |
 | POST | `/bff/auth/logout?complete=true` | 完全ログアウト（Keycloakセッションも無効化） | `LogoutResponse` |
-| GET | `/bff/auth/health` | ヘルスチェック | `HealthResponse` |
+| GET | `/actuator/health` | ヘルスチェック | Spring Boot Actuator標準レスポンス |
 
 ## DTOクラス
 
@@ -75,15 +75,11 @@ KeycloakとのOAuth2認証フローを処理するSpring BootのBFF (Backend for
 - **通常ログアウト** (`complete=false` または省略): BFFセッションのみクリア
 - **完全ログアウト** (`complete=true`): BFFセッション + Keycloakセッションをクリア
 
-### HealthResponse
-```json
-{
-  "status": "UP",
-  "service": "auth-bff"
-}
-```
 
 ### ErrorResponse
+統一的なエラーレスポンス形式。すべてのエラーで同じ構造を返却します。
+
+#### 基本エラー例
 ```json
 {
   "error": "UNAUTHORIZED",
@@ -93,6 +89,13 @@ KeycloakとのOAuth2認証フローを処理するSpring BootのBFF (Backend for
   "timestamp": "2025-01-20 10:30:45"
 }
 ```
+
+#### WebClient/Keycloak通信特有のエラーコード
+| エラーコード | HTTPステータス | 説明 |
+|-------------|---------------|------|
+| `KEYCLOAK_CLIENT_ERROR` | 400 | Keycloak通信でクライアントエラー |
+| `KEYCLOAK_SERVER_ERROR` | 503 | Keycloak サーバーエラー |
+| `KEYCLOAK_CONNECTION_ERROR` | 503 | Keycloak接続エラー |
 
 ## セキュリティ設定
 

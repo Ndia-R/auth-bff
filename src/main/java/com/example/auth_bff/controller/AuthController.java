@@ -6,6 +6,8 @@ import com.example.auth_bff.dto.UserResponse;
 import com.example.auth_bff.service.AuthService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
+import org.springframework.security.oauth2.client.annotation.RegisteredOAuth2AuthorizedClient;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -30,11 +32,12 @@ public class AuthController {
     public void startLogin(
         HttpServletRequest request,
         HttpServletResponse response,
-        @AuthenticationPrincipal OAuth2User principal
+        @AuthenticationPrincipal OAuth2User principal,
+        @RegisteredOAuth2AuthorizedClient("keycloak") OAuth2AuthorizedClient authorizedClient
     ) throws IOException {
 
-        // AuthServiceで厳密な認証チェック
-        boolean isAuthenticated = authService.isUserAuthenticated(principal, request.getSession(false));
+        // AuthServiceで包括的な認証チェック
+        boolean isAuthenticated = authService.isUserFullyAuthenticated(principal, request.getSession(false), authorizedClient);
 
         if (isAuthenticated) {
             // 既にログイン済みの場合、直接フロントエンドにリダイレクト
@@ -46,9 +49,11 @@ public class AuthController {
     }
 
     @GetMapping("/token")
-    public ResponseEntity<AccessTokenResponse> getToken(@AuthenticationPrincipal OAuth2User principal) {
-        // 認証済みの場合のみアクセストークンを返却
-        AccessTokenResponse response = authService.getAccessToken(principal);
+    public ResponseEntity<AccessTokenResponse> getToken(
+        @AuthenticationPrincipal OAuth2User principal,
+        @RegisteredOAuth2AuthorizedClient("keycloak") OAuth2AuthorizedClient authorizedClient
+    ) {
+        AccessTokenResponse response = authService.getAccessToken(principal, authorizedClient);
         return ResponseEntity.ok(response);
     }
 
@@ -70,8 +75,11 @@ public class AuthController {
     }
 
     @PostMapping("/refresh")
-    public ResponseEntity<AccessTokenResponse> refresh(@AuthenticationPrincipal OAuth2User principal) {
-        AccessTokenResponse response = authService.refreshAccessToken(principal);
+    public ResponseEntity<AccessTokenResponse> refresh(
+        @AuthenticationPrincipal OAuth2User principal,
+        @RegisteredOAuth2AuthorizedClient("keycloak") OAuth2AuthorizedClient authorizedClient
+    ) {
+        AccessTokenResponse response = authService.refreshAccessToken(principal, authorizedClient);
         return ResponseEntity.ok(response);
     }
 }

@@ -17,6 +17,8 @@ import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 import com.example.auth_bff.dto.ErrorResponse;
+import org.springframework.web.reactive.function.client.WebClientException;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 @Slf4j
 @RestControllerAdvice
@@ -138,6 +140,67 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             errorResponse,
             new HttpHeaders(),
             HttpStatus.FORBIDDEN,
+            request
+        );
+    }
+
+    @ExceptionHandler({ WebClientResponseException.class })
+    public ResponseEntity<Object> handleWebClientResponse(WebClientResponseException ex, WebRequest request) {
+        log.error("Keycloak通信エラー: {} - {}", ex.getStatusCode(), ex.getMessage(), ex);
+
+        String path = request.getDescription(false).replace("uri=", "");
+        String errorCode;
+        String message;
+        HttpStatus status;
+
+        // Keycloakからのエラーレスポンスを分析
+        if (ex.getStatusCode().is4xxClientError()) {
+            errorCode = "KEYCLOAK_CLIENT_ERROR";
+            message = "認証サーバーとの通信でクライアントエラーが発生しました";
+            status = HttpStatus.BAD_REQUEST;
+        } else if (ex.getStatusCode().is5xxServerError()) {
+            errorCode = "KEYCLOAK_SERVER_ERROR";
+            message = "認証サーバーで障害が発生しています。しばらく時間をおいて再試行してください";
+            status = HttpStatus.SERVICE_UNAVAILABLE;
+        } else {
+            errorCode = "KEYCLOAK_COMMUNICATION_ERROR";
+            message = "認証サーバーとの通信でエラーが発生しました";
+            status = HttpStatus.INTERNAL_SERVER_ERROR;
+        }
+
+        ErrorResponse errorResponse = new ErrorResponse(
+            errorCode,
+            message,
+            status.value(),
+            path
+        );
+
+        return this.handleExceptionInternal(
+            ex,
+            errorResponse,
+            new HttpHeaders(),
+            status,
+            request
+        );
+    }
+
+    @ExceptionHandler({ WebClientException.class })
+    public ResponseEntity<Object> handleWebClient(WebClientException ex, WebRequest request) {
+        log.error("Keycloak接続エラー: {}", ex.getMessage(), ex);
+
+        String path = request.getDescription(false).replace("uri=", "");
+        ErrorResponse errorResponse = new ErrorResponse(
+            "KEYCLOAK_CONNECTION_ERROR",
+            "認証サーバーに接続できませんでした。ネットワーク接続を確認してください",
+            HttpStatus.SERVICE_UNAVAILABLE.value(),
+            path
+        );
+
+        return this.handleExceptionInternal(
+            ex,
+            errorResponse,
+            new HttpHeaders(),
+            HttpStatus.SERVICE_UNAVAILABLE,
             request
         );
     }

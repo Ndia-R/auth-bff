@@ -7,6 +7,7 @@ import com.example.auth_bff.exception.UnauthorizedException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
 import org.springframework.security.oauth2.core.OAuth2AccessToken;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.oauth2.core.user.OAuth2User;
@@ -14,6 +15,8 @@ import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.web.util.UriComponentsBuilder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientException;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Mono;
 
 import jakarta.servlet.http.Cookie;
@@ -31,12 +34,6 @@ public class AuthService {
 
     @Value("${keycloak.logout-uri}")
     private String keycloakLogoutUri;
-
-    @Value("${spring.security.oauth2.client.registration.keycloak.client-id}")
-    private String clientId;
-
-    @Value("${spring.security.oauth2.client.registration.keycloak.client-secret}")
-    private String clientSecret;
 
     // ===========================================
     // 公開メソッド（エントリーポイント）
@@ -58,8 +55,6 @@ public class AuthService {
     ) {
         String username = (principal != null) ? principal.getName() : "anonymous";
 
-        log.info("Starting logout process - User: {}, Complete: {}", username, complete);
-
         // BFFセッション関連のクリア
         invalidateSession(request, username);
         clearSecurityContext();
@@ -67,13 +62,8 @@ public class AuthService {
 
         // Keycloakログアウト処理（完全ログアウト時のみ）
         if (complete) {
-            log.info("Complete logout requested - processing Keycloak logout for user: {}", username);
             processKeycloakLogout(principal);
-        } else {
-            log.info("Normal logout (BFF only) for user: {}", username);
         }
-
-        log.info("Logout completed for user: {}", username);
 
         return new LogoutResponse("success");
     }
@@ -81,18 +71,43 @@ public class AuthService {
     /**
      * アクセストークンを取得する
      */
-    public AccessTokenResponse getAccessToken(OAuth2User principal) {
+    public AccessTokenResponse getAccessToken(OAuth2User principal, OAuth2AuthorizedClient authorizedClient) {
         if (principal == null) {
             throw new UnauthorizedException("認証が必要です");
         }
+        if (authorizedClient == null) {
+            throw new UnauthorizedException("認証されたクライアントが見つかりません");
+        }
 
-        String principalName = extractPrincipalName(principal);
+        // Spring Securityが自動でリフレッシュしたトークンを使用
+        OAuth2AccessToken accessToken = authorizedClient.getAccessToken();
+        String tokenValue = accessToken.getTokenValue();
+        long expiresIn = tokenService.calculateExpiresIn(accessToken);
+        String tokenType = accessToken.getTokenType().getValue();
 
-        String accessToken = tokenService.getAccessToken(principalName);
-        long expiresIn = tokenService.getExpiresIn(principalName);
-        String tokenType = tokenService.getTokenType(principalName);
+        return new AccessTokenResponse(tokenValue, (int) expiresIn, tokenType);
+    }
 
-        return new AccessTokenResponse(accessToken, (int) expiresIn, tokenType);
+    /**
+     * アクセストークンをリフレッシュする
+     * 注意: Spring Security 6では@RegisteredOAuth2AuthorizedClientが自動でリフレッシュを処理するため、
+     * このメソッドは実質的にgetAccessTokenと同じ動作になります
+     */
+    public AccessTokenResponse refreshAccessToken(OAuth2User principal, OAuth2AuthorizedClient authorizedClient) {
+        if (principal == null) {
+            throw new UnauthorizedException("認証が必要です");
+        }
+        if (authorizedClient == null) {
+            throw new UnauthorizedException("認証されたクライアントが見つかりません");
+        }
+
+        // Spring Securityが既にリフレッシュ済みのトークンを提供
+        OAuth2AccessToken accessToken = authorizedClient.getAccessToken();
+        String tokenValue = accessToken.getTokenValue();
+        long expiresIn = tokenService.calculateExpiresIn(accessToken);
+        String tokenType = accessToken.getTokenType().getValue();
+
+        return new AccessTokenResponse(tokenValue, (int) expiresIn, tokenType);
     }
 
     /**
@@ -103,35 +118,18 @@ public class AuthService {
             throw new UnauthorizedException("認証が必要です");
         }
 
-        return new UserResponse(
-            principal.getAttribute("name"),
-            principal.getAttribute("email"),
-            principal.getAttribute("preferred_username")
-        );
+        String name = principal.getAttribute("name");
+        String email = principal.getAttribute("email");
+        String preferredUsername = principal.getAttribute("preferred_username");
+
+        return new UserResponse(name, email, preferredUsername);
     }
 
-    /**
-     * アクセストークンをリフレッシュする
-     */
-    public AccessTokenResponse refreshAccessToken(OAuth2User principal) {
-        if (principal == null) {
-            throw new UnauthorizedException("認証が必要です");
-        }
-
-        String principalName = extractPrincipalName(principal);
-        OAuth2AccessToken accessToken = tokenService.refreshAccessToken(principalName);
-
-        return new AccessTokenResponse(
-            accessToken.getTokenValue(),
-            (int) tokenService.calculateExpiresIn(accessToken),
-            accessToken.getTokenType().getValue()
-        );
-    }
 
     /**
-     * ユーザーの認証状態を厳密にチェックする
+     * ユーザーの認証状態を包括的にチェックする（セッション + トークン有効期限）
      */
-    public boolean isUserAuthenticated(OAuth2User principal, HttpSession session) {
+    public boolean isUserFullyAuthenticated(OAuth2User principal, HttpSession session, OAuth2AuthorizedClient authorizedClient) {
         try {
             // 基本的なnullチェック
             if (principal == null) {
@@ -159,6 +157,19 @@ public class AuthService {
                 return false;
             }
 
+            // OAuth2AuthorizedClientとトークン有効期限チェック
+            if (authorizedClient == null || authorizedClient.getAccessToken() == null) {
+                log.debug("Authorized client or access token is null: {}", username);
+                return false;
+            }
+
+            // アクセストークンの有効期限チェック
+            OAuth2AccessToken accessToken = authorizedClient.getAccessToken();
+            if (tokenService.isAccessTokenExpired(accessToken)) {
+                log.debug("Access token is expired: {}", username);
+                return false;
+            }
+
             log.debug("User is authenticated: {}", username);
             return true;
 
@@ -166,6 +177,15 @@ public class AuthService {
             log.warn("Error checking authentication status", e);
             return false;
         }
+    }
+
+
+    /**
+     * OAuth2ユーザーから識別名を抽出する
+     */
+    public String extractPrincipalName(OAuth2User principal) {
+        String principalName = principal.getAttribute("preferred_username");
+        return principalName != null ? principalName : principal.getName();
     }
 
     // ===========================================
@@ -179,9 +199,6 @@ public class AuthService {
         HttpSession session = request.getSession(false);
         if (session != null) {
             session.invalidate();
-            log.debug("Session invalidated for user: {}", username);
-        } else {
-            log.debug("No active session found for user: {}", username);
         }
     }
 
@@ -190,7 +207,6 @@ public class AuthService {
      */
     private void clearSecurityContext() {
         SecurityContextHolder.clearContext();
-        log.debug("Security context cleared");
     }
 
     /**
@@ -202,7 +218,6 @@ public class AuthService {
         bffSessionCookie.setHttpOnly(true);
         bffSessionCookie.setMaxAge(0);
         response.addCookie(bffSessionCookie);
-        log.debug("Session cookie cleared");
     }
 
     /**
@@ -210,25 +225,21 @@ public class AuthService {
      * @param principal 認証済みユーザー情報
      */
     private void processKeycloakLogout(OAuth2User principal) {
-        log.info("Starting Keycloak logout process using OpenID Connect RP-Initiated Logout");
-
         try {
             String principalName = extractPrincipalName(principal);
 
             // OidcUserでない場合はスキップ
             if (!(principal instanceof OidcUser)) {
-                log.warn("Principal is not an OidcUser, skipping Keycloak logout for user: {}", principalName);
+                log.debug("Principal is not an OidcUser, skipping Keycloak logout for user: {}", principalName);
                 return;
             }
 
             OidcUser oidcUser = (OidcUser) principal;
             String idToken = oidcUser.getIdToken().getTokenValue();
             if (idToken == null) {
-                log.warn("No ID token found for user: {}, skipping Keycloak logout", principalName);
+                log.debug("No ID token found for user: {}, skipping Keycloak logout", principalName);
                 return;
             }
-
-            log.debug("Keycloak logout URI: {}", keycloakLogoutUri);
 
             // OpenID Connect End Session Endpointを使用してログアウトURLを構築
             String endSessionUrl = UriComponentsBuilder
@@ -237,52 +248,36 @@ public class AuthService {
                 .build()
                 .toUriString();
 
-            log.info("Calling Keycloak end session endpoint for user: {}", principalName);
-            log.debug("End session URL: {}", endSessionUrl);
-
             // GETリクエストでKeycloakログアウト（OpenID Connect仕様準拠）
             webClient.get()
                 .uri(endSessionUrl)
                 .exchangeToMono(clientResponse -> {
                     if (clientResponse.statusCode().is2xxSuccessful() ||
                         clientResponse.statusCode().is3xxRedirection()) {
-                        log.info("Keycloak logout successful with status: {}", clientResponse.statusCode());
                         return clientResponse.bodyToMono(String.class);
                     } else {
                         log.error("Keycloak logout failed with status: {}", clientResponse.statusCode());
                         return clientResponse.bodyToMono(String.class)
-                            .doOnNext(errorBody -> {
-                                log.error("Keycloak error response body: {}", errorBody);
-                                log.error("Response headers: {}", clientResponse.headers().asHttpHeaders());
-                            })
                             .then(
                                 Mono.error(
-                                    new RuntimeException(
-                                        "Keycloak logout failed with " + clientResponse.statusCode()
-                                            + ". Check logs for details."
-                                    )
+                                    new RuntimeException("Keycloak logout failed with " + clientResponse.statusCode())
                                 )
                             );
                     }
                 })
                 .block();
 
-            log.info("Keycloak session invalidated successfully for user: {}", principalName);
+            log.debug("Keycloak logout successful for user: {}", principalName);
+
+        } catch (WebClientResponseException e) {
+            log.warn("Keycloak logout failed ({}), but BFF logout will continue", e.getStatusCode());
+
+        } catch (WebClientException e) {
+            log.warn("Could not connect to Keycloak for logout, but BFF logout will continue");
 
         } catch (Exception e) {
-            log.error("Failed to invalidate Keycloak session: {}", e.getMessage());
-            log.error("Error calling Keycloak logout endpoint", e);
-            // Keycloakログアウトが失敗してもBFFログアウトは継続
+            log.warn("Keycloak logout error: {}, but BFF logout will continue", e.getMessage());
         }
-
-        log.info("Keycloak logout process completed");
     }
 
-    /**
-     * OAuth2ユーザーから識別名を抽出する
-     */
-    private String extractPrincipalName(OAuth2User principal) {
-        String principalName = principal.getAttribute("preferred_username");
-        return principalName != null ? principalName : principal.getName();
-    }
 }

@@ -1,139 +1,43 @@
 package com.example.auth_bff.service;
 
-import com.example.auth_bff.exception.UnauthorizedException;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
-import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
-import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.core.OAuth2AccessToken;
-import org.springframework.security.oauth2.core.OAuth2RefreshToken;
-import org.springframework.security.oauth2.core.endpoint.OAuth2AccessTokenResponse;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.http.MediaType;
-import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.util.MultiValueMap;
 
 import java.time.Instant;
 
-@Slf4j
+/**
+ * TokenService - Spring Security 6対応版
+ *
+ * 注意: Spring Security 6では@RegisteredOAuth2AuthorizedClientが
+ * 自動でトークン管理を行うため、このクラスは最小限の実装となります。
+ * 手動リフレッシュロジックは削除し、Spring Securityに委譲します。
+ */
 @Service
-@RequiredArgsConstructor
 public class TokenService {
 
-    private final OAuth2AuthorizedClientService authorizedClientService;
-    private final WebClient webClient;
-
-    public OAuth2AuthorizedClient getAuthorizedClient(String principalName) {
-        return authorizedClientService.loadAuthorizedClient("keycloak", principalName);
+    /**
+     * OAuth2AccessTokenの有効期限をチェックする
+     * Spring Security内部でも使用される基本的なユーティリティ
+     */
+    public boolean isAccessTokenExpired(OAuth2AccessToken accessToken) {
+        if (accessToken == null) {
+            return true;
+        }
+        Instant expiresAt = accessToken.getExpiresAt();
+        return expiresAt != null && expiresAt.isBefore(Instant.now());
     }
 
-    public String getAccessToken(String principalName) {
-        OAuth2AuthorizedClient authorizedClient = getAuthorizedClient(principalName);
-        if (authorizedClient == null) {
-            throw new UnauthorizedException("認証されたクライアントが見つかりません");
-        }
-        if (authorizedClient.getAccessToken() == null) {
-            throw new UnauthorizedException("アクセストークンが見つかりません");
-        }
-        return authorizedClient.getAccessToken().getTokenValue();
-    }
-
-    public long getExpiresIn(String principalName) {
-        OAuth2AuthorizedClient authorizedClient = getAuthorizedClient(principalName);
-        if (authorizedClient == null) {
-            throw new UnauthorizedException("認証されたクライアントが見つかりません");
-        }
-        if (authorizedClient.getAccessToken() == null) {
-            throw new UnauthorizedException("アクセストークンが見つかりません");
-        }
-        return calculateExpiresIn(authorizedClient.getAccessToken());
-    }
-
-    public String getTokenType(String principalName) {
-        OAuth2AuthorizedClient authorizedClient = getAuthorizedClient(principalName);
-        if (authorizedClient == null) {
-            throw new UnauthorizedException("認証されたクライアントが見つかりません");
-        }
-        if (authorizedClient.getAccessToken() == null) {
-            throw new UnauthorizedException("アクセストークンが見つかりません");
-        }
-        return authorizedClient.getAccessToken().getTokenType().getValue();
-    }
-
-    public OAuth2AccessToken refreshAccessToken(String principalName) {
-        OAuth2AuthorizedClient authorizedClient = getAuthorizedClient(principalName);
-
-        if (authorizedClient == null) {
-            log.error("認証されたクライアントが見つかりません: {}", principalName);
-            throw new UnauthorizedException("認証されたクライアントが見つかりません");
-        }
-
-        OAuth2RefreshToken refreshToken = authorizedClient.getRefreshToken();
-        if (refreshToken == null) {
-            log.error("リフレッシュトークンが見つかりません: {}", principalName);
-            throw new UnauthorizedException("リフレッシュトークンが見つかりません");
-        }
-
-        try {
-            OAuth2AccessTokenResponse tokenResponse = performTokenRefresh(authorizedClient, refreshToken);
-
-            // 新しいトークンでOAuth2AuthorizedClientを更新
-            OAuth2AuthorizedClient updatedClient = new OAuth2AuthorizedClient(
-                authorizedClient.getClientRegistration(),
-                authorizedClient.getPrincipalName(),
-                tokenResponse.getAccessToken(),
-                tokenResponse.getRefreshToken() != null ? tokenResponse.getRefreshToken() : refreshToken
-            );
-
-            authorizedClientService.saveAuthorizedClient(updatedClient, null);
-
-            log.info("アクセストークンのリフレッシュが成功しました: {}", principalName);
-            return tokenResponse.getAccessToken();
-
-        } catch (Exception e) {
-            log.error("トークンリフレッシュ中にエラーが発生しました: {}", e.getMessage(), e);
-            throw new UnauthorizedException("トークンリフレッシュに失敗しました: " + e.getMessage());
-        }
-    }
-
-    private OAuth2AccessTokenResponse performTokenRefresh(
-        OAuth2AuthorizedClient authorizedClient,
-        OAuth2RefreshToken refreshToken
-    ) {
-        ClientRegistration clientRegistration = authorizedClient.getClientRegistration();
-
-        MultiValueMap<String, String> requestBody = new LinkedMultiValueMap<>();
-        requestBody.add("grant_type", "refresh_token");
-        requestBody.add("refresh_token", refreshToken.getTokenValue());
-        requestBody.add("client_id", clientRegistration.getClientId());
-        requestBody.add("client_secret", clientRegistration.getClientSecret());
-
-        return webClient.post()
-            .uri(clientRegistration.getProviderDetails().getTokenUri())
-            .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-            .bodyValue(requestBody)
-            .retrieve()
-            .bodyToMono(OAuth2AccessTokenResponse.class)
-            .block();
-    }
-
+    /**
+     * OAuth2AccessTokenの残り有効時間を秒数で計算する
+     */
     public long calculateExpiresIn(OAuth2AccessToken accessToken) {
+        if (accessToken == null) {
+            return 0;
+        }
         Instant expiresAt = accessToken.getExpiresAt();
         if (expiresAt != null) {
             return expiresAt.getEpochSecond() - Instant.now().getEpochSecond();
         }
         return 3600; // デフォルト1時間
-    }
-
-    public boolean isTokenExpired(String principalName) {
-        OAuth2AuthorizedClient authorizedClient = getAuthorizedClient(principalName);
-        if (authorizedClient == null || authorizedClient.getAccessToken() == null) {
-            return true;
-        }
-
-        Instant expiresAt = authorizedClient.getAccessToken().getExpiresAt();
-        return expiresAt != null && expiresAt.isBefore(Instant.now());
     }
 }

@@ -24,7 +24,7 @@
 - `POST /bff/auth/logout` - ログアウトとセッションクリア
 - `GET /bff/auth/user` - 現在のユーザー情報取得
 - `POST /bff/auth/refresh` - アクセストークンのリフレッシュ
-- `GET /bff/auth/health` - ヘルスチェックエンドポイント
+- `GET /actuator/health` - ヘルスチェックエンドポイント（Spring Boot Actuator）
 
 ## 設定
 

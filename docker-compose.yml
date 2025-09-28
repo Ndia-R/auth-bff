@@ -2,6 +2,8 @@ services:
   auth-bff:
     build:
       context: .
+      dockerfile: Dockerfile
+      target: development
     ports:
       - 8888:8080
     environment:

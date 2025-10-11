@@ -1,13 +1,11 @@
 package com.example.auth_bff.controller;
 
-import com.example.auth_bff.dto.AccessTokenResponse;
 import com.example.auth_bff.dto.LogoutResponse;
 import com.example.auth_bff.dto.UserResponse;
 import com.example.auth_bff.service.AuthService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
-import org.springframework.security.oauth2.client.annotation.RegisteredOAuth2AuthorizedClient;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -28,33 +26,29 @@ public class AuthController {
 
     private final AuthService authService;
 
+    @Value("${app.frontend.url}")
+    private String frontendUrl;
+
+    /**
+     * ログイン開始エンドポイント
+     *
+     * Spring Securityの認証状態に基づいてリダイレクト先を決定します。
+     * - 認証済み（principal != null）: フロントエンドにリダイレクト
+     * - 未認証（principal == null）: OAuth2認証フローを開始
+     */
     @GetMapping("/login")
     public void startLogin(
-        HttpServletRequest request,
         HttpServletResponse response,
-        @AuthenticationPrincipal OAuth2User principal,
-        @RegisteredOAuth2AuthorizedClient("keycloak") OAuth2AuthorizedClient authorizedClient
-    ) throws IOException {
-
-        // AuthServiceで包括的な認証チェック
-        boolean isAuthenticated = authService.isUserFullyAuthenticated(principal, request.getSession(false), authorizedClient);
-
-        if (isAuthenticated) {
+        @AuthenticationPrincipal OAuth2User principal
+    )
+        throws IOException {
+        if (principal != null) {
             // 既にログイン済みの場合、直接フロントエンドにリダイレクト
-            response.sendRedirect("http://localhost:5173/auth-callback");
+            response.sendRedirect(frontendUrl + "/auth-callback");
         } else {
             // 未認証の場合、OAuth2認証フローを開始
             response.sendRedirect("/oauth2/authorization/keycloak");
         }
-    }
-
-    @GetMapping("/token")
-    public ResponseEntity<AccessTokenResponse> getToken(
-        @AuthenticationPrincipal OAuth2User principal,
-        @RegisteredOAuth2AuthorizedClient("keycloak") OAuth2AuthorizedClient authorizedClient
-    ) {
-        AccessTokenResponse response = authService.getAccessToken(principal, authorizedClient);
-        return ResponseEntity.ok(response);
     }
 
     @PostMapping("/logout")
@@ -71,15 +65,6 @@ public class AuthController {
     @GetMapping("/user")
     public ResponseEntity<UserResponse> user(@AuthenticationPrincipal OAuth2User principal) {
         UserResponse response = authService.getUserInfo(principal);
-        return ResponseEntity.ok(response);
-    }
-
-    @PostMapping("/refresh")
-    public ResponseEntity<AccessTokenResponse> refresh(
-        @AuthenticationPrincipal OAuth2User principal,
-        @RegisteredOAuth2AuthorizedClient("keycloak") OAuth2AuthorizedClient authorizedClient
-    ) {
-        AccessTokenResponse response = authService.refreshAccessToken(principal, authorizedClient);
         return ResponseEntity.ok(response);
     }
 }

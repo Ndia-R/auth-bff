@@ -24,86 +24,6 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
-    @ExceptionHandler({ NotFoundException.class })
-    public ResponseEntity<Object> handleNotFound(NotFoundException ex, WebRequest request) {
-        log.error("リソースが見つかりません: {}", ex.getMessage(), ex);
-
-        ErrorResponse errorResponse = new ErrorResponse(
-            "NOT_FOUND",
-            ex.getMessage(),
-            HttpStatus.NOT_FOUND.value(),
-            request.getDescription(false).replace("uri=", "")
-        );
-
-        return this.handleExceptionInternal(
-            ex,
-            errorResponse,
-            new HttpHeaders(),
-            HttpStatus.NOT_FOUND,
-            request
-        );
-    }
-
-    @ExceptionHandler({ BadRequestException.class })
-    public ResponseEntity<Object> handleBadRequest(BadRequestException ex, WebRequest request) {
-        log.error("不正なリクエスト: {}", ex.getMessage(), ex);
-
-        ErrorResponse errorResponse = new ErrorResponse(
-            "INVALID_REQUEST",
-            ex.getMessage(),
-            HttpStatus.BAD_REQUEST.value(),
-            request.getDescription(false).replace("uri=", "")
-        );
-
-        return this.handleExceptionInternal(
-            ex,
-            errorResponse,
-            new HttpHeaders(),
-            HttpStatus.BAD_REQUEST,
-            request
-        );
-    }
-
-    @ExceptionHandler({ ValidationException.class })
-    public ResponseEntity<Object> handleValidation(ValidationException ex, WebRequest request) {
-        log.error("バリデーションエラー: {}", ex.getMessage(), ex);
-
-        ErrorResponse errorResponse = new ErrorResponse(
-            "VALIDATION_FAILED",
-            ex.getMessage(),
-            HttpStatus.BAD_REQUEST.value(),
-            request.getDescription(false).replace("uri=", "")
-        );
-
-        return this.handleExceptionInternal(
-            ex,
-            errorResponse,
-            new HttpHeaders(),
-            HttpStatus.BAD_REQUEST,
-            request
-        );
-    }
-
-    @ExceptionHandler({ ConflictException.class })
-    public ResponseEntity<Object> handleConflict(ConflictException ex, WebRequest request) {
-        log.error("競合エラー: {}", ex.getMessage(), ex);
-
-        ErrorResponse errorResponse = new ErrorResponse(
-            "CONFLICT",
-            ex.getMessage(),
-            HttpStatus.CONFLICT.value(),
-            request.getDescription(false).replace("uri=", "")
-        );
-
-        return this.handleExceptionInternal(
-            ex,
-            errorResponse,
-            new HttpHeaders(),
-            HttpStatus.CONFLICT,
-            request
-        );
-    }
-
     @ExceptionHandler({ UnauthorizedException.class })
     public ResponseEntity<Object> handleUnauthorized(UnauthorizedException ex, WebRequest request) {
         log.error("認証エラー: {}", ex.getMessage(), ex);
@@ -120,26 +40,6 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             errorResponse,
             new HttpHeaders(),
             HttpStatus.UNAUTHORIZED,
-            request
-        );
-    }
-
-    @ExceptionHandler({ ForbiddenException.class })
-    public ResponseEntity<Object> handleForbidden(ForbiddenException ex, WebRequest request) {
-        log.error("認可エラー: {}", ex.getMessage(), ex);
-
-        String path = request.getDescription(false).replace("uri=", "");
-        ErrorResponse errorResponse = new ErrorResponse(
-            "FORBIDDEN",
-            ex.getMessage(),
-            HttpStatus.FORBIDDEN.value(),
-            path
-        );
-        return this.handleExceptionInternal(
-            ex,
-            errorResponse,
-            new HttpHeaders(),
-            HttpStatus.FORBIDDEN,
             request
         );
     }

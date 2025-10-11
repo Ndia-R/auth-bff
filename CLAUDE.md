@@ -12,47 +12,72 @@
 - 修正案を説明し、ユーザーの承認を得てから実行する
 
 ## 概要
-KeycloakとのOAuth2認証フローを処理するSpring BootのBFF (Backend for Frontend)アプリケーションです。PKCE（Proof Key for Code Exchange）対応により、よりセキュアなOAuth2認証を実現しています。
+
+KeycloakとのOAuth2認証フローを処理する**必要最小限のSpring Boot BFF (Backend for Frontend)** アプリケーションです。
+
+### 🎯 特徴
+
+1. **真のBFFパターン実装**: フロントエンドはトークンを一切扱わず、BFFがすべてのAPI呼び出しをプロキシ
+   - XSS攻撃からトークンを完全に保護
+   - セッションCookieのみでAPIアクセス可能
+
+2. **PKCE対応**: Authorization Code with PKCEによるセキュアなOAuth2認証
+
+3. **最小構成**: 14ファイルのみで構成された、保守しやすいシンプルな設計
+   - 未使用のクラス・メソッドは一切なし
+   - Spring Boot自動設定を最大限活用
+
+4. **完全なCSRF保護**: CookieベースのCSRFトークンで状態変更操作を保護
+
+5. **OpenID Connect準拠**: RP-Initiated Logoutによる確実なKeycloakセッション無効化
 
 ## アーキテクチャ
 
 ### 認証フロー（PKCE対応）
 ```
-フロント(SPA) → BFF → Keycloak → BFF → フロント
-     ↓               ↓        ↓       ↓
-  /bff/auth/login  OAuth2   JWT    SessionCookie
-                  (PKCE)
+フロントエンド (SPA)
+    ↓ Cookie: BFFSESSIONID + XSRF-TOKEN
+   BFF (APIゲートウェイ)
+    ├─ 認証管理 (/bff/auth/*)
+    ├─ APIプロキシ (/api/books/*, /api/music/*)
+    └─ トークン管理（Redisセッション）
+    ↓ Authorization: Bearer <access_token>
+リソースサーバー (API)
+    ├─ 書籍API (/books/*)
+    └─ 音楽API (/music/*)
 ```
 
-### 主要コンポーネント
-- **AuthController**: HTTP認証エンドポイント
-- **AuthService**: 認証ビジネスロジック
-- **TokenService**: OAuth2トークン管理
-- **SecurityConfig**: Spring Security設定（PKCE対応）
-- **GlobalExceptionHandler**: 統一エラーハンドリング
+### 主要コンポーネント（最小構成）
+- **AuthController**: 認証エンドポイント（ログイン・ログアウト・ユーザー情報）
+- **ApiProxyController**: APIプロキシ（書籍・音楽API転送、トークン自動付与）
+- **AuthService**: 認証ビジネスロジック（ログアウト、ユーザー情報取得、認証状態確認）
+- **TokenService**: トークン有効期限チェック（リフレッシュはSpring Securityが自動処理）
+- **SecurityConfig**: Spring Security設定（PKCE、CSRF保護、CORS）
+- **GlobalExceptionHandler**: 統一エラーハンドリング（認証エラー、Keycloak通信エラー）
+- **RedisConfig**: Spring Session Data Redis設定（自動設定を使用）
 
 ## エンドポイント
+
+### 認証エンドポイント
 
 | メソッド | パス | 説明 | レスポンス |
 |---------|------|------|-----------|
 | GET | `/bff/auth/login` | 認証状態確認・OAuth2フロー開始 | リダイレクト |
-| GET | `/bff/auth/token` | アクセストークン取得 | `AccessTokenResponse` |
-| POST | `/bff/auth/refresh` | アクセストークンリフレッシュ | `AccessTokenResponse` |
 | GET | `/bff/auth/user` | 現在のユーザー情報取得 | `UserResponse` |
 | POST | `/bff/auth/logout` | ログアウト・セッションクリア | `LogoutResponse` |
 | POST | `/bff/auth/logout?complete=true` | 完全ログアウト（Keycloakセッションも無効化） | `LogoutResponse` |
 | GET | `/actuator/health` | ヘルスチェック | Spring Boot Actuator標準レスポンス |
 
-## DTOクラス
+### APIプロキシエンドポイント（新規追加）
 
-### AccessTokenResponse
-```json
-{
-  "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "expires_in": 3600,
-  "token_type": "Bearer"
-}
-```
+| メソッド | パス | 説明 | 転送先 |
+|---------|------|------|--------|
+| GET/POST/PUT/DELETE | `/api/books/**` | 書籍APIプロキシ | `${RESOURCE_SERVER_URL}/books/**` |
+| GET/POST/PUT/DELETE | `/api/music/**` | 音楽APIプロキシ | `${RESOURCE_SERVER_URL}/music/**` |
+
+**重要**: フロントエンドは `/api/books/*` や `/api/music/*` を呼び出すだけで、BFFが自動的にアクセストークンを付与してリソースサーバーに転送します。フロントエンドはトークンを一切扱いません。
+
+## DTOクラス
 
 ### UserResponse
 ```json
@@ -99,6 +124,31 @@ KeycloakとのOAuth2認証フローを処理するSpring BootのBFF (Backend for
 
 ## セキュリティ設定
 
+### CSRF保護（新規追加）
+- **有効化**: ✅ CookieCsrfTokenRepository使用
+- **CSRFトークンCookie**: `XSRF-TOKEN` (HttpOnly=false)
+- **CSRFトークンヘッダー**: `X-XSRF-TOKEN`
+- **保護対象**: POST, PUT, DELETE, PATCH
+
+**フロントエンド実装例:**
+```javascript
+// CSRFトークンをCookieから取得してヘッダーに設定
+const csrfToken = document.cookie
+  .split('; ')
+  .find(row => row.startsWith('XSRF-TOKEN='))
+  ?.split('=')[1];
+
+fetch('/api/books', {
+  method: 'POST',
+  credentials: 'include',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-XSRF-TOKEN': csrfToken  // CSRF保護
+  },
+  body: JSON.stringify({ title: '新しい本' })
+});
+```
+
 ### セッション管理
 - **ストレージ**: Redis
 - **タイムアウト**: 30分
@@ -106,28 +156,111 @@ KeycloakとのOAuth2認証フローを処理するSpring BootのBFF (Backend for
 - **属性**: HttpOnly, Secure, SameSite=lax
 
 ### CORS設定
-- **許可オリジン**: `http://app.example.com*`, `http://localhost:*`
+- **許可オリジン**: 環境変数 `${CORS_ALLOWED_ORIGINS}` から読み込み
 - **許可メソッド**: GET, POST, PUT, DELETE, OPTIONS
+- **許可ヘッダー**: Authorization, Content-Type, X-XSRF-TOKEN
 - **資格情報**: 許可
 
 ### OAuth2設定
 - **プロバイダー**: Keycloak
-- **フロー**: Authorization Code
+- **フロー**: Authorization Code with PKCE
 - **スコープ**: openid, profile, email
 
 ## 環境変数
 
 ### 基本設定
 ```bash
-# Keycloak設定
+# ============================================
+# Keycloak Configuration
+# ============================================
 KEYCLOAK_CLIENT_ID=my-books-client
 KEYCLOAK_CLIENT_SECRET=your-client-secret
 KEYCLOAK_REDIRECT_URI=http://localhost:8888/bff/login/oauth2/code/keycloak
 
 # 本番環境（シンプルな設定）
-KEYCLOAK_ISSUER_URI=https://auth.example.com/realms/test-user-realm
+# KEYCLOAK_ISSUER_URI=https://auth.example.com/realms/test-user-realm
 
 # 開発環境（個別エンドポイント指定でネットワーク分離問題を解決）
+KEYCLOAK_AUTHORIZE_URI=http://localhost:8180/realms/test-user-realm/protocol/openid-connect/auth
+KEYCLOAK_TOKEN_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/token
+KEYCLOAK_JWK_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/certs
+KEYCLOAK_LOGOUT_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/logout
+KEYCLOAK_POST_LOGOUT_REDIRECT_URI=http://localhost:5173/logout-complete
+
+# ============================================
+# Redis Configuration
+# ============================================
+REDIS_HOST=redis
+REDIS_PORT=6379
+
+# ============================================
+# Application Configuration (新規追加)
+# ============================================
+# フロントエンドURL
+FRONTEND_URL=http://localhost:5173
+
+# リソースサーバーURL
+RESOURCE_SERVER_URL=http://api.example.com
+
+# CORS許可オリジン（カンマ区切り）
+CORS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:*
+```
+
+## 開発環境
+
+### 環境概要
+このプロジェクトは **WSL2上のUbuntu** で **VSCode DevContainer** + **Docker Compose** を使用して開発しています。Claude Code対応の完全な開発環境を提供します。
+
+```
+WSL2 (Ubuntu) → VSCode DevContainer → Docker Compose
+                                          ├── auth-bff (開発コンテナ)
+                                          ├── redis (セッションストレージ)
+                                          └── keycloak (認証サーバー)
+```
+
+### DevContainer構成
+
+#### 基本情報
+- **コンテナ名**: `auth-bff`
+- **ベースイメージ**: `eclipse-temurin:17-jdk-jammy`
+- **実行ユーザー**: `vscode`
+- **作業ディレクトリ**: `/workspace`
+- **コマンド**: `sleep infinity` (DevContainer用)
+
+#### インストール済みツール
+| ツール | バージョン | 用途 |
+|--------|-----------|------|
+| Java (Eclipse Temurin) | 17 | アプリケーション実行環境 |
+| Gradle | ラッパー経由 | ビルドツール |
+| Python | 3.10.12 | Serena MCP用 |
+| uv | 最新 | Pythonパッケージマネージャー (Serena MCP) |
+| Git | 最新 | バージョン管理 |
+
+#### VSCode拡張機能
+`.devcontainer/devcontainer.json`で以下の拡張機能が自動インストールされます：
+- `vscjava.vscode-java-pack` - Java開発パック
+- `mhutchie.git-graph` - Git履歴可視化
+- `streetsidesoftware.code-spell-checker` - スペルチェック
+- `shengchen.vscode-checkstyle` - Checkstyle連携
+- `cweijan.vscode-database-client2` - データベースクライアント
+- `anthropic.claude-code` - Claude Code AI開発支援
+
+#### 永続化ボリューム
+DevContainer再起動後もデータを保持するために以下のボリュームをマウント：
+
+| ボリューム名 | マウント先 | 用途 |
+|------------|-----------|------|
+| (プロジェクトディレクトリ) | `/workspace` | ソースコード |
+| `gradle-cache` | `/home/vscode/.gradle` | Gradleキャッシュ |
+| `claude-config` | `/home/vscode/.claude` | Claude Code設定・認証情報 |
+
+#### 環境変数
+DevContainerは`.env`ファイルまたはdocker-compose.ymlから以下の環境変数を読み込みます：
+```bash
+# Keycloak設定
+KEYCLOAK_CLIENT_ID=my-books-client
+KEYCLOAK_CLIENT_SECRET=your-client-secret
+KEYCLOAK_REDIRECT_URI=http://localhost:8888/bff/login/oauth2/code/keycloak
 KEYCLOAK_AUTHORIZE_URI=http://localhost:8180/realms/test-user-realm/protocol/openid-connect/auth
 KEYCLOAK_TOKEN_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/token
 KEYCLOAK_JWK_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/certs
@@ -135,45 +268,85 @@ KEYCLOAK_JWK_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-con
 # Redis設定
 REDIS_HOST=redis
 REDIS_PORT=6379
-
-# セキュリティ設定
-COOKIE_SECURE=false
-COOKIE_SAME_SITE=lax
-SESSION_TIMEOUT=30m
 ```
 
-## 開発環境
+### Docker Compose サービス構成
 
-### Docker Compose環境
-このプロジェクトは **WSL2上のUbuntu** で **Docker Compose** を使用して開発しています。Claude Code対応の完全な開発環境を提供します。
-
+#### 1. auth-bff (開発コンテナ)
+```yaml
+ports: 8888:8080  # 外部:内部
+networks: shared-network
+depends_on: [redis, keycloak]
 ```
-WSL2 (Ubuntu) → Docker Compose
-                   ├── auth-bff (Eclipse Temurin 17 + Claude Code)
-                   ├── redis (セッションストレージ)
-                   └── keycloak (認証サーバー + realm-export.json)
+- Spring Bootアプリケーションを実行
+- Claude Code開発環境
+- コンテナ間通信: `http://keycloak:8080`, `redis:6379`
+- 外部アクセス: `http://localhost:8888`
+
+#### 2. redis (セッションストレージ)
+```yaml
+image: redis:8.2
+ports: 6379:6379
+networks: shared-network
+```
+- BFFのセッションデータを保存
+- Spring Session Data Redisで使用
+
+#### 3. keycloak (認証サーバー)
+```yaml
+image: quay.io/keycloak/keycloak:26.3.3
+ports: 8180:8080
+networks: shared-network
+command: start-dev --import-realm
+```
+- OAuth2/OpenID Connect認証サーバー
+- `realm-export.json`から自動設定インポート
+- 管理コンソール: `http://localhost:8180` (admin/admin)
+- 外部アクセス: `http://localhost:8180`
+- コンテナ内部: `http://keycloak:8080`
+
+### ネットワーク構成
+```
+外部ブラウザ
+    ↓ http://localhost:8888
+auth-bff:8080 ←→ redis:6379
+    ↓ http://keycloak:8080 (内部通信)
+keycloak:8080
+    ↑ http://localhost:8180 (外部アクセス)
+外部ブラウザ
 ```
 
-### 開発環境の構成
-- **プラットフォーム**: WSL2 + Ubuntu + Docker Compose
-- **IDE**: Claude Code (Anthropic AI) + VSCode対応
-- **Java**: Eclipse Temurin 17
-- **コンテナ構成**:
-  - `auth-bff`: アプリケーションコンテナ (port 8888:8080)
-  - `redis`: セッションストレージ (port 6379)
-  - `keycloak`: 認証サーバー (port 8180:8080)
+**重要**: OAuth2認証フローでは、ブラウザは`localhost:8180`、BFFは`keycloak:8080`を使用します。
 
 ### 開発環境起動
+
+#### 初回起動
 ```bash
-# Docker Compose環境起動
+# 1. Docker Compose環境起動
 docker compose up -d
 
-# auth-bffコンテナに接続してClaude Code使用
+# 2. VSCodeでDevContainer接続
+code .
+# VSCodeコマンドパレット: "Dev Containers: Reopen in Container"
+
+# 3. 起動確認
+./gradlew --version
+```
+
+#### 日常的な起動
+```bash
+# VSCodeでプロジェクトを開く
+code .
+# 自動的にDevContainerが起動します
+```
+
+#### コンテナ内で作業
+```bash
+# auth-bffコンテナに直接接続
 docker compose exec auth-bff bash
 
-# または、VSCodeでDevContainer接続
-code .
-# Dev Containers: Reopen in Container
+# アプリケーション実行
+./gradlew bootRun
 ```
 
 ## ビルド・実行
@@ -192,17 +365,71 @@ code .
 docker compose up -d
 ```
 
+## プロジェクト構成
+
+### 📁 ソースコード構成（最小構成・14ファイル）
+
+```
+src/main/java/com/example/auth_bff/
+├── AuthBffApplication.java              # メインクラス
+│
+├── config/                              # 設定（4ファイル）
+│   ├── CsrfCookieFilter.java           # CSRF Cookie自動設定フィルター
+│   ├── RedisConfig.java                 # Redis/Spring Session設定
+│   ├── SecurityConfig.java              # Spring Security + PKCE + CORS
+│   └── WebClientConfig.java             # WebClient設定（Keycloak通信用）
+│
+├── controller/                          # コントローラー（2ファイル）
+│   ├── ApiProxyController.java          # APIプロキシ（/api/books/**, /api/music/**）
+│   └── AuthController.java              # 認証エンドポイント（/bff/auth/*）
+│
+├── dto/                                 # DTO（3ファイル）
+│   ├── ErrorResponse.java               # 統一エラーレスポンス
+│   ├── LogoutResponse.java              # ログアウトレスポンス
+│   └── UserResponse.java                # ユーザー情報レスポンス
+│
+├── exception/                           # 例外（2ファイル）
+│   ├── GlobalExceptionHandler.java      # 統一エラーハンドラー
+│   └── UnauthorizedException.java       # 認証エラー例外（唯一のカスタム例外）
+│
+└── service/                             # サービス（2ファイル）
+    ├── AuthService.java                 # 認証ビジネスロジック
+    └── TokenService.java                # トークン有効期限チェック
+```
+
+### 🎯 設計原則
+
+1. **必要最小限の構成**: すべてのクラスとメソッドが実際に使用されている
+2. **真のBFFパターン**: フロントエンドはトークンを一切扱わない
+3. **Spring Boot自動設定の活用**: カスタムBean最小限
+4. **シンプルなエラーハンドリング**: 実際に発生する例外のみ処理
+
+### 📊 削除された未使用要素（2025-01-20）
+
+以下の要素は使用されていないため削除され、よりシンプルな構成になりました：
+
+- ❌ `AccessTokenResponse.java` - トークン公開用DTO（BFFパターンでは不要）
+- ❌ `BadRequestException.java` - 未使用例外
+- ❌ `ValidationException.java` - 未使用例外
+- ❌ `ConflictException.java` - 未使用例外
+- ❌ `NotFoundException.java` - 未使用例外
+- ❌ `ForbiddenException.java` - 未使用例外
+- ❌ `AuthService.getAccessToken()` - 未使用メソッド
+- ❌ `AuthService.refreshAccessToken()` - 重複メソッド
+- ❌ `RedisConfig.redisTemplate` Bean - Spring Session自動設定を使用
+
 ## 開発時の注意点
 
 ### コーディングスタイル
 - **早期例外**: null チェック後即座に例外をスロー
 - **型安全**: 具体的なDTOクラスを使用
 - **単一責任**: Controller/Service/Repository の明確な分離
+- **必要最小限**: 未使用のクラス・メソッドは作らない
 
 ### エラーハンドリング
-- 認証エラー: `UnauthorizedException`
-- バリデーションエラー: `ValidationException`
-- その他ビジネス例外: 適切なカスタム例外を使用
+- 認証エラー: `UnauthorizedException`（唯一のカスタム例外）
+- Keycloak通信エラー: `WebClientException`, `WebClientResponseException`
+- その他一般エラー: `Exception`
 - すべて`GlobalExceptionHandler`で統一処理
 
 ### テスト
@@ -526,51 +753,108 @@ tail -f logs/application.log | grep -E "(OAuth2|Security|Auth)"
 tail -f logs/application.log | grep ERROR
 ```
 
-## API使用例
+## API使用例（BFFパターン）
+
+### 🎯 重要: フロントエンドはトークンを一切扱いません
+
+真のBFFパターンでは、フロントエンドは**セッションCookieのみ**を使用し、トークンは完全にBFF側で管理されます。
 
 ### 認証フロー
+
 ```javascript
 // 1. ログイン開始（未認証の場合Keycloakにリダイレクト）
-// /bff/auth/loginは認証状態をチェックし、適切にリダイレクトします
 window.location.href = '/bff/auth/login';
 
-// 2. アクセストークン取得（認証後）
-fetch('/bff/auth/token')
-  .then(response => response.json())
-  .then(data => {
-    // アクセストークンを取得
-    const accessToken = data.access_token;
+// 2. 認証後、フロントエンドにリダイレクト（例: /auth-callback）
+// セッションCookie (BFFSESSIONID) と CSRFトークン (XSRF-TOKEN) が自動的に設定される
 
-    // APIサーバーへのリクエストで使用
-    fetch('https://api.example.com/data', {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`
-      }
-    });
-  });
-
-// 3. トークンリフレッシュ
-fetch('/bff/auth/refresh', { method: 'POST' })
+// 3. ユーザー情報取得
+fetch('/bff/auth/user', {
+  credentials: 'include'  // セッションCookieを送信
+})
   .then(response => response.json())
-  .then(data => {
-    const newToken = data.access_token;
+  .then(user => {
+    console.log(user.name);  // "田中太郎"
+    console.log(user.email); // "tanaka@example.com"
   });
 
 // 4. ログアウト
 // 通常ログアウト（BFFセッションのみクリア）
-fetch('/bff/auth/logout', { method: 'POST' })
+fetch('/bff/auth/logout', {
+  method: 'POST',
+  credentials: 'include'
+})
   .then(response => response.json())
   .then(data => {
     console.log(data.message); // "success"
   });
 
 // 完全ログアウト（BFFセッション + Keycloakセッションクリア）
-fetch('/bff/auth/logout?complete=true', { method: 'POST' })
+fetch('/bff/auth/logout?complete=true', {
+  method: 'POST',
+  credentials: 'include'
+})
   .then(response => response.json())
   .then(data => {
     console.log(data.message); // "success"
+    window.location.href = '/';  // トップページにリダイレクト
   });
 ```
+
+### APIプロキシの使用（書籍・音楽API）
+
+```javascript
+// CSRFトークンを取得するヘルパー関数
+function getCsrfToken() {
+  return document.cookie
+    .split('; ')
+    .find(row => row.startsWith('XSRF-TOKEN='))
+    ?.split('=')[1];
+}
+
+// GET リクエスト（書籍一覧取得）
+fetch('/api/books/list', {
+  credentials: 'include'  // セッションCookieのみ
+})
+  .then(response => response.json())
+  .then(books => {
+    console.log(books);
+  });
+
+// POST リクエスト（新しい書籍を追加）
+fetch('/api/books', {
+  method: 'POST',
+  credentials: 'include',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-XSRF-TOKEN': getCsrfToken()  // CSRF保護
+  },
+  body: JSON.stringify({
+    title: 'Spring Security実践ガイド',
+    author: '山田太郎'
+  })
+})
+  .then(response => response.json())
+  .then(book => {
+    console.log('作成された書籍:', book);
+  });
+
+// 音楽APIも同様
+fetch('/api/music/playlist', {
+  credentials: 'include'
+})
+  .then(response => response.json())
+  .then(playlist => {
+    console.log(playlist);
+  });
+```
+
+### ✅ このパターンの利点
+
+1. **トークン完全隠蔽**: フロントエンドはトークンを見ることも触ることもできない
+2. **XSS攻撃対策**: JavaScriptからトークンにアクセス不可
+3. **シンプルな実装**: セッションCookieだけを意識すればよい
+4. **自動リフレッシュ**: BFFが裏でトークンを自動更新
 
 ---
 

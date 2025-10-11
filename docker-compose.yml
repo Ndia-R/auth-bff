@@ -12,20 +12,24 @@ services:
       KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID}
       KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET}
       KEYCLOAK_REDIRECT_URI: ${KEYCLOAK_REDIRECT_URI}
-      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI}
       KEYCLOAK_AUTHORIZE_URI: ${KEYCLOAK_AUTHORIZE_URI}
       KEYCLOAK_TOKEN_URI: ${KEYCLOAK_TOKEN_URI}
       KEYCLOAK_JWK_URI: ${KEYCLOAK_JWK_URI}
+      KEYCLOAK_LOGOUT_URI: ${KEYCLOAK_LOGOUT_URI}
+      KEYCLOAK_POST_LOGOUT_REDIRECT_URI: ${KEYCLOAK_POST_LOGOUT_REDIRECT_URI}
       # Redis Configuration
       REDIS_HOST: ${REDIS_HOST}
       REDIS_PORT: ${REDIS_PORT}
+      # Application Configuration
+      FRONTEND_URL: ${FRONTEND_URL}
+      RESOURCE_SERVER_URL: ${RESOURCE_SERVER_URL}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      # Claude Configuration
+      CONTEXT7_API_KEY: ${CONTEXT7_API_KEY}
     volumes:
       - .:/workspace
       - gradle-cache:/home/vscode/.gradle
-      # Claude Code用の永続化設定（プロジェクト固有）
       - claude-config:/home/vscode/.claude
-      - claude-history:/commandhistory
-      - claude-npm-global:/home/vscode/.npm-global
     depends_on:
       - redis
       - keycloak
@@ -58,7 +62,6 @@ services:
       # issuer統一のためのホスト名設定
       KC_HOSTNAME: localhost
       KC_HOSTNAME_PORT: 8180
-      KEYCLOAK_FRONTEND_URL: http://localhost:8180
 
     volumes:
       - ./realm-export.json:/opt/keycloak/data/import/realm-export.json
@@ -70,11 +73,8 @@ services:
 volumes:
   gradle-cache:
   keycloak-data:
-  # Claude Code用のボリューム（プロジェクト固有）
-  claude-config:      # Claude設定・認証情報
-  claude-history:     # コマンド履歴
-  claude-npm-global:  # npmグローバルパッケージ
+  claude-config:
 
 networks:
   shared-network:
-    external: true
+    driver: bridge

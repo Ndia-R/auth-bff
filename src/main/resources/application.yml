@@ -59,26 +59,31 @@ server:
 # Logging Configuration
 logging:
   level:
-    org.springframework.security: DEBUG
-    org.springframework.security.oauth2: DEBUG
-    org.springframework.session: DEBUG
-    com.example.auth_bff: DEBUG
-    # HTTP通信の詳細ログ
-    # org.springframework.web.client.RestTemplate: DEBUG
-    org.springframework.http.client: DEBUG
-    org.apache.http: DEBUG
-    # HTTPリクエストヘッダーの詳細表示
-    org.springframework.web.client.RestTemplate: TRACE
-    org.springframework.http.client.support: TRACE
-    # OAuth2プロバイダーの詳細ログ
-    org.springframework.security.oauth2.client.userinfo: DEBUG
-    org.springframework.security.oauth2.core: DEBUG
+    root: INFO
+    com.example.auth_bff: INFO
+    # Spring Security関連のログは警告以上のみ
+    org.springframework.security: WARN
+    org.springframework.security.oauth2: WARN
+    org.springframework.session: WARN
   pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
 
 # Keycloak Configuration
 keycloak:
   logout-uri: ${KEYCLOAK_LOGOUT_URI:http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/logout}
+  post-logout-redirect-uri: ${KEYCLOAK_POST_LOGOUT_REDIRECT_URI:http://localhost:5173/logout-complete}
+
+# Application Configuration
+app:
+  # フロントエンドURL
+  frontend:
+    url: ${FRONTEND_URL:http://localhost:5173}
+  # リソースサーバーURL
+  resource-server:
+    url: ${RESOURCE_SERVER_URL:http://api.example.com}
+  # CORS許可オリジン
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:*}
 
 # Management and Actuator
 management:

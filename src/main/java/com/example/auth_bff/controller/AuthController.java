@@ -30,25 +30,18 @@ public class AuthController {
     private String frontendUrl;
 
     /**
-     * ログイン開始エンドポイント
+     * ログインエンドポイント
      *
-     * Spring Securityの認証状態に基づいてリダイレクト先を決定します。
-     * - 認証済み（principal != null）: フロントエンドにリダイレクト
-     * - 未認証（principal == null）: OAuth2認証フローを開始
+     * <p>このエンドポイントは認証が必要なため、Spring Securityによって保護されています。</p>
+     * <ul>
+     *   <li><b>未認証ユーザー</b>がアクセスすると、コントローラーに到達する前にSpring SecurityがOAuth2認証フロー（Keycloakログイン画面）へリダイレクトします。</li>
+     *   <li><b>認証済みユーザー</b>がアクセスすると、このメソッドが実行され、フロントエンドの認証後コールバックページへリダイレクトされます。</li>
+     * </ul>
      */
     @GetMapping("/login")
-    public void startLogin(
-        HttpServletResponse response,
-        @AuthenticationPrincipal OAuth2User principal
-    )
-        throws IOException {
-        if (principal != null) {
-            // 既にログイン済みの場合、直接フロントエンドにリダイレクト
-            response.sendRedirect(frontendUrl + "/auth-callback");
-        } else {
-            // 未認証の場合、OAuth2認証フローを開始
-            response.sendRedirect("/oauth2/authorization/keycloak");
-        }
+    public void login(HttpServletResponse response) throws IOException {
+        // 認証済みのため、フロントエンドの認証後コールバックページにリダイレクト
+        response.sendRedirect(frontendUrl + "/auth-callback");
     }
 
     @PostMapping("/logout")

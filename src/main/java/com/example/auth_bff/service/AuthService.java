@@ -3,7 +3,6 @@ package com.example.auth_bff.service;
 import com.example.auth_bff.dto.LogoutResponse;
 import com.example.auth_bff.dto.UserResponse;
 import com.example.auth_bff.exception.UnauthorizedException;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,12 +20,17 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 
+/**
+ * 認証サービス
+ *
+ * <p>BFFの認証関連ビジネスロジックを提供する。
+ * ログアウト処理、ユーザー情報取得、Keycloakとの連携を担当。
+ */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class AuthService {
 
-    private final WebClient webClient;
+    private final WebClient webClient = WebClient.create();
 
     @Value("${keycloak.logout-uri}")
     private String keycloakLogoutUri;
@@ -114,6 +118,15 @@ public class AuthService {
 
     /**
      * Keycloakログアウト処理を実行する（OpenID Connect RP-Initiated Logout方式）
+     *
+     * <p><b>重要な設計方針:</b></p>
+     * <ul>
+     *   <li>Keycloakへの通知が失敗しても、BFFのログアウト処理は成功とみなす</li>
+     *   <li>理由: ユーザーのBFFセッションは既に無効化済みであり、
+     *       Keycloak側のエラーでログアウトを妨げるべきではないため</li>
+     *   <li>エラーは警告ログに記録されるが、例外はスローしない</li>
+     * </ul>
+     *
      * @param principal 認証済みユーザー情報
      */
     private void processKeycloakLogout(OAuth2User principal) {

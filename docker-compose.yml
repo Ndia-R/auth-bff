@@ -24,8 +24,6 @@ services:
       FRONTEND_URL: ${FRONTEND_URL}
       RESOURCE_SERVER_URL: ${RESOURCE_SERVER_URL}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
-      # Claude Configuration
-      CONTEXT7_API_KEY: ${CONTEXT7_API_KEY}
     volumes:
       - .:/workspace
       - gradle-cache:/home/vscode/.gradle

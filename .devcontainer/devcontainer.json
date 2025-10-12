@@ -12,7 +12,8 @@
           "streetsidesoftware.code-spell-checker",
           "shengchen.vscode-checkstyle",
           "cweijan.vscode-database-client2",
-          "anthropic.claude-code"
+          "anthropic.claude-code",
+          "Google.gemini-cli-vscode-ide-companion"
       ]
     }
   },

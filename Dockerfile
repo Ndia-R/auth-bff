@@ -24,3 +24,9 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # uvをPATHに追加
 ENV PATH="/home/vscode/.local/bin:$PATH"
+
+# Gemini CLIをグローバルインストール
+USER root
+RUN npm install -g @google/gemini-cli
+# 元のユーザーに戻す
+USER vscode

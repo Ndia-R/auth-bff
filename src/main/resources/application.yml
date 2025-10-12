@@ -70,20 +70,22 @@ logging:
 
 # Keycloak Configuration
 keycloak:
-  logout-uri: ${KEYCLOAK_LOGOUT_URI:http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/logout}
-  post-logout-redirect-uri: ${KEYCLOAK_POST_LOGOUT_REDIRECT_URI:http://localhost:5173/logout-complete}
+  logout-uri: ${KEYCLOAK_LOGOUT_URI}
+  # 注: 現在の実装では、BFFがバックエンドからWebClientでKeycloakにログアウトリクエストを送信するため、
+  # post_logout_redirect_uriはブラウザには届きません。フロントエンド側で独自にリダイレクト処理を実装してください。
+  post-logout-redirect-uri: ${KEYCLOAK_POST_LOGOUT_REDIRECT_URI}
 
 # Application Configuration
 app:
   # フロントエンドURL
   frontend:
-    url: ${FRONTEND_URL:http://localhost:5173}
+    url: ${FRONTEND_URL}
   # リソースサーバーURL
   resource-server:
-    url: ${RESOURCE_SERVER_URL:http://api.example.com}
+    url: ${RESOURCE_SERVER_URL}
   # CORS許可オリジン
   cors:
-    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:*}
+    allowed-origins: ${CORS_ALLOWED_ORIGINS}
 
 # Management and Actuator
 management:

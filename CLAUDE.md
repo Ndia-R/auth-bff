@@ -23,9 +23,10 @@ KeycloakとのOAuth2認証フローを処理する**必要最小限のSpring Boo
 
 2. **PKCE対応**: Authorization Code with PKCEによるセキュアなOAuth2認証
 
-3. **最小構成**: 12ファイルで構成された、保守しやすいシンプルな設計
+3. **最小構成**: 13ファイルで構成された、保守しやすいシンプルな設計
    - 未使用のクラス・メソッドは一切なし
    - Spring Boot自動設定を最大限活用
+   - シンプルな設定管理（@Valueアノテーション）
 
 4. **完全なCSRF保護**: CookieベースのCSRFトークンで状態変更操作を保護
 
@@ -50,31 +51,32 @@ KeycloakとのOAuth2認証フローを処理する**必要最小限のSpring Boo
     └─ データ処理
 ```
 
-### 主要コンポーネント（最小構成・12ファイル）
+### 主要コンポーネント（最小構成・13ファイル）
 
 #### アプリケーション
 - **AuthBffApplication**: メインクラス
 
 #### 設定 (config/)
+- **WebClientConfig**: 共有WebClient設定（シングルトン、タイムアウト管理）
 - **CsrfCookieFilter**: CSRF Cookie自動設定フィルター
 - **RedisConfig**: Spring Session Data Redis設定
 - **SecurityConfig**: Spring Security設定（PKCE、CSRF保護、CORS）
 
 #### コントローラー (controller/)
-- **ApiProxyController**: すべてのAPIリクエストをプロキシ（168行、1メソッドのみ）
+- **ApiProxyController**: すべてのAPIリクエストをプロキシ（175行、1メソッドのみ）
 - **AuthController**: 認証エンドポイント（ログイン・ログアウト・ユーザー情報）
 
 #### DTO (dto/)
-- **ErrorResponse**: 統一エラーレスポンス
+- **ErrorResponse**: 統一エラーレスポンス（タイムスタンプ自動生成）
 - **LogoutResponse**: ログアウトレスポンス
 - **UserResponse**: ユーザー情報レスポンス
 
 #### 例外 (exception/)
-- **GlobalExceptionHandler**: 統一エラーハンドリング
+- **GlobalExceptionHandler**: 統一エラーハンドリング（WebClient例外対応）
 - **UnauthorizedException**: 認証エラー例外
 
 #### サービス (service/)
-- **AuthService**: 認証ビジネスロジック（ログアウト、ユーザー情報取得）
+- **AuthService**: 認証ビジネスロジック（ログアウト、ユーザー情報取得、Keycloak連携）
 
 ## エンドポイント
 
@@ -230,14 +232,8 @@ KEYCLOAK_CLIENT_ID=my-books-client
 KEYCLOAK_CLIENT_SECRET=your-client-secret
 KEYCLOAK_REDIRECT_URI=http://localhost:8888/bff/login/oauth2/code/keycloak
 
-# 本番環境（シンプルな設定）
-# KEYCLOAK_ISSUER_URI=https://auth.example.com/realms/test-user-realm
-
-# 開発環境（個別エンドポイント指定でネットワーク分離問題を解決）
-KEYCLOAK_AUTHORIZE_URI=http://localhost:8180/realms/test-user-realm/protocol/openid-connect/auth
-KEYCLOAK_TOKEN_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/token
-KEYCLOAK_JWK_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/certs
-KEYCLOAK_LOGOUT_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/logout
+# 外部Keycloak使用（ISSUER_URIで統一）
+KEYCLOAK_ISSUER_URI=http://auth.localhost:8444/realms/test-user-realm
 KEYCLOAK_POST_LOGOUT_REDIRECT_URI=http://localhost:5173/logout-complete
 
 # ============================================
@@ -257,7 +253,12 @@ RESOURCE_SERVER_URL=http://api.example.com
 
 # CORS許可オリジン（カンマ区切り）
 CORS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:*
+
+# リソースサーバータイムアウト（秒、デフォルト: 30）
+RESOURCE_SERVER_TIMEOUT=30
 ```
+
+**重要**: `KEYCLOAK_ISSUER_URI`を使用することで、Spring Securityが自動的に各エンドポイント（authorize, token, jwk, logout）を検出します。個別エンドポイント指定は不要です。
 
 ## 開発環境
 
@@ -267,9 +268,10 @@ CORS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:*
 ```
 WSL2 (Ubuntu) → VSCode DevContainer → Docker Compose
                                           ├── auth-bff (開発コンテナ)
-                                          ├── redis (セッションストレージ)
-                                          └── keycloak (認証サーバー)
+                                          └── redis (セッションストレージ)
 ```
+
+**注意**: Keycloakは外部の認証サーバー（`https://auth.localhost`）を使用します。
 
 ### DevContainer構成
 
@@ -299,7 +301,7 @@ WSL2 (Ubuntu) → VSCode DevContainer → Docker Compose
 ```yaml
 ports: 8888:8080
 networks: shared-network
-depends_on: [redis, keycloak]
+depends_on: [redis]
 ```
 
 #### 2. redis (セッションストレージ)
@@ -309,27 +311,16 @@ ports: 6379:6379
 networks: shared-network
 ```
 
-#### 3. keycloak (認証サーバー)
-```yaml
-image: quay.io/keycloak/keycloak:26.3.3
-ports: 8180:8080
-networks: shared-network
-command: start-dev --import-realm
-```
-- 管理コンソール: `http://localhost:8180` (admin/admin)
-
 ### ネットワーク構成
 ```
 外部ブラウザ
     ↓ http://localhost:8888
 auth-bff:8080 ←→ redis:6379
-    ↓ http://keycloak:8080 (内部通信)
-keycloak:8080
-    ↑ http://localhost:8180 (外部アクセス)
-外部ブラウザ
+    ↓ http://auth.localhost:8444 (外部Keycloak)
+Keycloak (外部認証サーバー)
 ```
 
-**重要**: OAuth2認証フローでは、ブラウザは`localhost:8180`、BFFは`keycloak:8080`を使用します。
+**重要**: Keycloakは外部サーバー（`http://auth.localhost:8444`）を使用します。`KEYCLOAK_ISSUER_URI`環境変数で接続先を指定してください。
 
 ### 開発環境起動
 
@@ -363,19 +354,20 @@ docker compose up -d
 
 ## プロジェクト構成
 
-### 📁 ソースコード構成（12ファイル）
+### 📁 ソースコード構成（13ファイル）
 
 ```
 src/main/java/com/example/auth_bff/
 ├── AuthBffApplication.java              # メインクラス
 │
-├── config/                              # 設定（3ファイル）
+├── config/                              # 設定（4ファイル）
+│   ├── WebClientConfig.java             # 共有WebClient設定（シングルトン）
 │   ├── CsrfCookieFilter.java           # CSRF Cookie自動設定フィルター
 │   ├── RedisConfig.java                 # Redis/Spring Session設定
 │   └── SecurityConfig.java              # Spring Security + PKCE + CORS
 │
 ├── controller/                          # コントローラー（2ファイル）
-│   ├── ApiProxyController.java          # APIプロキシ（/api/**、168行、1メソッド）
+│   ├── ApiProxyController.java          # APIプロキシ（/api/**、175行、1メソッド）
 │   └── AuthController.java              # 認証エンドポイント（/bff/auth/*）
 │
 ├── dto/                                 # DTO（3ファイル）
@@ -398,7 +390,9 @@ src/main/java/com/example/auth_bff/
 3. **権限制御の委譲**: BFFは認証に専念、権限はリソースサーバーが管理
 4. **Spring Boot自動設定の活用**: カスタムBean最小限
 5. **シンプルなエラーハンドリング**: 実際に発生する例外のみ処理
-6. **1メソッドプロキシ**: ApiProxyControllerは168行、1メソッドのみ
+6. **1メソッドプロキシ**: ApiProxyControllerは175行、1メソッドのみ
+7. **シンプルな設定管理**: @Valueアノテーションで直接的に設定値を取得
+8. **WebClientシングルトン**: コネクションプール再利用によるパフォーマンス向上
 
 ## 開発時の注意点
 
@@ -440,9 +434,9 @@ docker compose up redis -d
    - Redis接続確認
    - Cookie設定（Secure属性）確認
 
-4. **OAuth2ネットワーク分離問題**
-   - 開発環境では個別エンドポイント指定（`KEYCLOAK_AUTHORIZE_URI`等）
-   - 本番環境では`KEYCLOAK_ISSUER_URI`のみでOK
+4. **Keycloak接続問題**
+   - `KEYCLOAK_ISSUER_URI`が正しく設定されているか確認
+   - 外部Keycloakサーバーにアクセス可能か確認
 
 ## API使用例（BFFパターン）
 
@@ -500,6 +494,100 @@ fetch('/api/books', {
 ```
 
 **重要**: BFFは `/api/**` 配下のすべてのリクエストを自動的にプロキシします。新しいエンドポイント追加時、BFF側のコード変更は不要です。
+
+---
+
+## 📈 リファクタリングによる改善点
+
+このプロジェクトは大幅なリファクタリングを経て、以下の改善が実施されました。
+
+### ✅ Keycloak設定のシンプル化
+
+#### 導入前（個別エンドポイント指定）
+```yaml
+KEYCLOAK_AUTHORIZE_URI=http://localhost:8180/realms/test-user-realm/protocol/openid-connect/auth
+KEYCLOAK_TOKEN_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/token
+KEYCLOAK_JWK_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/certs
+KEYCLOAK_LOGOUT_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/logout
+```
+
+#### 導入後（issuer-uri統一）
+```yaml
+KEYCLOAK_ISSUER_URI=http://auth.localhost:8444/realms/test-user-realm
+```
+
+**改善効果:**
+- 設定がシンプルに（5つのエンドポイント設定→1つのissuer-uri）
+- Spring Securityが自動的にエンドポイントを検出
+- 本番環境での設定ミスを削減
+
+### ✅ WebClientのパフォーマンス最適化
+
+#### 導入前（旧実装）
+```java
+// リクエストごとにWebClientを作成（非効率）
+WebClient client = WebClient.builder()
+    .baseUrl(resourceServerUrl)
+    .build();
+```
+
+**問題点:**
+- リクエストごとにコネクションを作成・破棄
+- コネクションプールが使えない
+- リソースリーク発生の可能性
+
+#### 導入後（現在）
+```java
+@Bean
+public WebClient webClient() {
+    // シングルトンBeanとして1つだけ作成
+    return WebClient.builder()
+        .clientConnector(new ReactorClientHttpConnector(httpClient))
+        .build();
+}
+```
+
+**改善効果:**
+- コネクションプールの再利用
+- パフォーマンス向上（Keep-Alive接続）
+- リソース効率の大幅改善
+
+### ✅ エラーハンドリングの充実
+
+#### 追加されたエラー処理
+- `WebClientResponseException`: Keycloak通信のHTTPエラー
+- `WebClientException`: Keycloak接続エラー
+- バリデーションエラーの詳細メッセージ
+
+#### エラーレスポンスの統一化
+```json
+{
+  "error": "KEYCLOAK_SERVER_ERROR",
+  "message": "認証サーバーで障害が発生しています",
+  "status": 503,
+  "path": "/bff/auth/logout",
+  "timestamp": "2025-10-13 10:30:45"
+}
+```
+
+### ✅ ドキュメンテーションの充実
+
+すべてのクラスに以下の情報を含む詳細なJavadocを追加：
+- **設計方針**: なぜこの設計にしたのか
+- **処理フロー**: どのように動作するのか
+- **使用箇所**: どこから呼ばれるのか
+- **注意点**: 気をつけるべきポイント
+
+### 📊 改善サマリー
+
+| 項目 | 改善前 | 改善後 | 効果 |
+|------|--------|--------|------|
+| ファイル数 | 12ファイル | 13ファイル | 必要最小限に最適化 |
+| Keycloak設定 | 個別エンドポイント指定 | issuer-uri統一 | 設定がシンプルに |
+| 設定管理 | 複雑な設定クラス | @Value統一 | シンプルで直感的 |
+| WebClient | リクエストごと作成 | シングルトン | 性能向上 |
+| エラー処理 | 基本的な処理のみ | WebClient例外対応 | 障害対応力向上 |
+| ドキュメント | 簡易コメント | 詳細Javadoc | 保守性向上 |
 
 ---
 

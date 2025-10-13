@@ -8,14 +8,11 @@ services:
       - 8888:8080
     environment:
       TZ: Asia/Tokyo
-      # Keycloak Configuration
+      # Keycloak Configuration (外部Keycloak使用)
       KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID}
       KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET}
       KEYCLOAK_REDIRECT_URI: ${KEYCLOAK_REDIRECT_URI}
-      KEYCLOAK_AUTHORIZE_URI: ${KEYCLOAK_AUTHORIZE_URI}
-      KEYCLOAK_TOKEN_URI: ${KEYCLOAK_TOKEN_URI}
-      KEYCLOAK_JWK_URI: ${KEYCLOAK_JWK_URI}
-      KEYCLOAK_LOGOUT_URI: ${KEYCLOAK_LOGOUT_URI}
+      KEYCLOAK_ISSUER_URI: ${KEYCLOAK_ISSUER_URI}
       KEYCLOAK_POST_LOGOUT_REDIRECT_URI: ${KEYCLOAK_POST_LOGOUT_REDIRECT_URI}
       # Redis Configuration
       REDIS_HOST: ${REDIS_HOST}
@@ -28,9 +25,10 @@ services:
       - .:/workspace
       - gradle-cache:/home/vscode/.gradle
       - claude-config:/home/vscode/.claude
+    extra_hosts:
+      - "auth.localhost:host-gateway"
     depends_on:
       - redis
-      - keycloak
     networks:
       - shared-network
     command: sleep infinity
@@ -42,35 +40,8 @@ services:
     networks:
       - shared-network
 
-  keycloak:
-    image: quay.io/keycloak/keycloak:26.3.3
-    ports:
-      - 8180:8080
-    environment:
-      TZ: Asia/Tokyo
-      # 初回セットアップ用管理者アカウント
-      KC_BOOTSTRAP_ADMIN_USERNAME: admin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
-      # 開発用ファイルベースDB
-      KC_DB: dev-file
-      # 開発環境用の緩和設定
-      KC_HOSTNAME_STRICT: false
-      KC_HOSTNAME_STRICT_HTTPS: false
-      KC_HTTP_ENABLED: true
-      # issuer統一のためのホスト名設定
-      KC_HOSTNAME: localhost
-      KC_HOSTNAME_PORT: 8180
-
-    volumes:
-      - ./realm-export.json:/opt/keycloak/data/import/realm-export.json
-      - keycloak-data:/opt/keycloak/data
-    networks:
-      - shared-network
-    command: start-dev --import-realm
-
 volumes:
   gradle-cache:
-  keycloak-data:
   claude-config:
 
 networks:

@@ -57,7 +57,8 @@
       "Bash(tree:*)",
       "Bash(/home/vscode/.local/bin/uvx:*)",
       "Bash(UV_PYTHON=python3 /home/vscode/.local/bin/uvx:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(rm:*)"
     ],
     "deny": [],
     "ask": []

@@ -1,5 +1,6 @@
 package com.example.auth_bff.controller;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -16,7 +17,6 @@ import org.springframework.web.util.UriBuilder;
 import jakarta.servlet.http.HttpServletRequest;
 
 import java.net.URI;
-import java.time.Duration;
 import java.util.Set;
 
 /**
@@ -34,13 +34,18 @@ import java.util.Set;
  * <h3>権限制御</h3>
  * <p>権限制御はリソースサーバー側で行う。BFFは認証済みユーザーのリクエストを
  * そのまま転送し、リソースサーバーが適切に権限チェックを実施する。
+ *
+ * <h3>WebClient利用</h3>
+ * <p>WebClientはWebClientConfigで定義されたシングルトンBeanを使用。
+ * コネクションプールの再利用によりパフォーマンスとリソース効率を向上。
  */
 @Slf4j
 @RestController
+@RequiredArgsConstructor
 @RequestMapping("/api")
 public class ApiProxyController {
 
-    private final WebClient webClient = WebClient.create();
+    private final WebClient webClient;
 
     @Value("${app.resource-server.url}")
     private String resourceServerUrl;
@@ -158,7 +163,6 @@ public class ApiProxyController {
                             .body(responseBody)
                     );
             })
-            .timeout(Duration.ofSeconds(30)) // 30秒タイムアウト
             .block();
     }
 }

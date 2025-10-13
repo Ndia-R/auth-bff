@@ -3,9 +3,11 @@ package com.example.auth_bff.service;
 import com.example.auth_bff.dto.LogoutResponse;
 import com.example.auth_bff.dto.UserResponse;
 import com.example.auth_bff.exception.UnauthorizedException;
+
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.web.util.UriComponentsBuilder;
@@ -25,15 +27,20 @@ import jakarta.servlet.http.HttpSession;
  *
  * <p>BFFの認証関連ビジネスロジックを提供する。
  * ログアウト処理、ユーザー情報取得、Keycloakとの連携を担当。
+ *
+ * <h3>WebClient利用</h3>
+ * <p>WebClientはWebClientConfigで定義されたシングルトンBeanを使用。
+ * Keycloakへのログアウトリクエストでコネクションプールを再利用。
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class AuthService {
 
-    private final WebClient webClient = WebClient.create();
+    private final WebClient webClient;
 
-    @Value("${keycloak.logout-uri}")
-    private String keycloakLogoutUri;
+    @Value("${keycloak.issuer-uri}")
+    private String keycloakIssuerUri;
 
     @Value("${keycloak.post-logout-redirect-uri}")
     private String postLogoutRedirectUri;
@@ -59,7 +66,7 @@ public class AuthService {
         // BFFセッション関連のクリア
         invalidateSession(request);
         clearSecurityContext();
-        clearSessionCookie(response);
+        clearAuthenticationCookies(response);
 
         // Keycloakログアウト処理（完全ログアウト時のみ）
         if (complete) {
@@ -106,14 +113,42 @@ public class AuthService {
     }
 
     /**
-     * セッションクッキーを削除する
+     * 認証関連のCookieをすべて削除する
+     *
+     * <p>ログアウト時に以下のCookieを削除します:</p>
+     * <ul>
+     *   <li>BFFSESSIONID: BFFセッションCookie（HttpOnly=true）</li>
+     *   <li>XSRF-TOKEN: CSRFトークンCookie（HttpOnly=false）</li>
+     * </ul>
+     *
+     * <p><b>設計方針:</b></p>
+     * <ul>
+     *   <li>ログアウト後はクリーンな状態にするため、すべての認証関連Cookieを削除</li>
+     *   <li>XSRF-TOKENもセッションに紐付いているため、ログアウト時に削除すべき</li>
+     *   <li>次回ログイン時に新しいセッションと新しいCSRFトークンが生成される</li>
+     * </ul>
      */
-    private void clearSessionCookie(HttpServletResponse response) {
-        Cookie bffSessionCookie = new Cookie("BFFSESSIONID", null);
-        bffSessionCookie.setPath("/");
-        bffSessionCookie.setHttpOnly(true);
-        bffSessionCookie.setMaxAge(0);
-        response.addCookie(bffSessionCookie);
+    private void clearAuthenticationCookies(HttpServletResponse response) {
+        // BFFセッションCookieを削除
+        clearCookie(response, "BFFSESSIONID", true);
+
+        // CSRFトークンCookieを削除
+        clearCookie(response, "XSRF-TOKEN", false);
+    }
+
+    /**
+     * 指定されたCookieを削除する
+     *
+     * @param response HTTPレスポンス
+     * @param name Cookie名
+     * @param httpOnly HttpOnly属性（trueの場合、JavaScriptからアクセス不可）
+     */
+    private void clearCookie(HttpServletResponse response, String name, boolean httpOnly) {
+        Cookie cookie = new Cookie(name, null);
+        cookie.setPath("/");
+        cookie.setHttpOnly(httpOnly);
+        cookie.setMaxAge(0); // maxAge=0で削除
+        response.addCookie(cookie);
     }
 
     /**
@@ -145,8 +180,10 @@ public class AuthService {
             }
 
             // OpenID Connect End Session Endpointを使用してログアウトURLを構築
+            // issuer-uri + "/protocol/openid-connect/logout" の形式
+            String logoutUri = keycloakIssuerUri + "/protocol/openid-connect/logout";
             String endSessionUrl = UriComponentsBuilder
-                .fromUriString(keycloakLogoutUri)
+                .fromUriString(logoutUri)
                 .queryParam("id_token_hint", idToken)
                 .queryParam("post_logout_redirect_uri", postLogoutRedirectUri)
                 .build()

@@ -1,5 +1,6 @@
 package com.example.auth_bff.service;
 
+import com.example.auth_bff.client.OidcMetadataClient;
 import com.example.auth_bff.dto.LogoutResponse;
 import com.example.auth_bff.dto.UserResponse;
 import com.example.auth_bff.exception.UnauthorizedException;
@@ -46,6 +47,9 @@ class AuthServiceTest {
     private WebClient webClient;
 
     @Mock
+    private OidcMetadataClient oidcMetadataClient;
+
+    @Mock
     private HttpServletRequest request;
 
     @Mock
@@ -61,8 +65,7 @@ class AuthServiceTest {
 
     @BeforeEach
     void setUp() {
-        authService = new AuthService(webClient);
-        ReflectionTestUtils.setField(authService, "keycloakLogoutUri", "http://keycloak:8080/logout");
+        authService = new AuthService(webClient, oidcMetadataClient);
         ReflectionTestUtils.setField(authService, "postLogoutRedirectUri", "http://localhost:5173/logout-complete");
     }
 
@@ -100,7 +103,8 @@ class AuthServiceTest {
 
         // Assert
         assertThat(result.getMessage()).isEqualTo("success");
-        verify(response).addCookie(any());
+        // 2つのCookie（BFFSESSIONID, XSRF-TOKEN）が削除される
+        verify(response, times(2)).addCookie(any());
     }
 
     /**

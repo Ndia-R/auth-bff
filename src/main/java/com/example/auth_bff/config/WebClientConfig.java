@@ -69,11 +69,12 @@ public class WebClientConfig {
             // レスポンスタイムアウト設定
             .responseTimeout(Duration.ofSeconds(resourceServerTimeout))
             // 接続確立後のタイムアウトハンドラー設定
-            .doOnConnected(conn -> conn
-                // 読み込みタイムアウト
-                .addHandlerLast(new ReadTimeoutHandler(resourceServerTimeout, TimeUnit.SECONDS))
-                // 書き込みタイムアウト
-                .addHandlerLast(new WriteTimeoutHandler(resourceServerTimeout, TimeUnit.SECONDS))
+            .doOnConnected(
+                conn -> conn
+                    // 読み込みタイムアウト
+                    .addHandlerLast(new ReadTimeoutHandler(resourceServerTimeout, TimeUnit.SECONDS))
+                    // 書き込みタイムアウト
+                    .addHandlerLast(new WriteTimeoutHandler(resourceServerTimeout, TimeUnit.SECONDS))
             );
 
         // WebClientをビルド

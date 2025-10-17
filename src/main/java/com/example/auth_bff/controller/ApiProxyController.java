@@ -118,26 +118,30 @@ public class ApiProxyController {
             return builder.build();
         });
 
-        // ボディ設定 + ヘッダー設定（POST/PUTの場合はボディを先に設定）
+        // ボディ設定 + ヘッダー設定
         WebClient.RequestHeadersSpec<?> headersSpec;
 
         if ("GET".equals(method) || "DELETE".equals(method)) {
-            // GET/DELETE: ヘッダー設定のみ
-            headersSpec = bodySpec
-                .headers(h -> h.setBearerAuth(client.getAccessToken().getTokenValue()));
+            // GET/DELETE: ボディなし
+            headersSpec = bodySpec;
         } else {
-            // POST/PUT: ボディ設定 → ヘッダー設定（Content-Type含む）
-            headersSpec = bodySpec
-                .bodyValue(body != null ? body : "")
-                .headers(h -> {
-                    h.setBearerAuth(client.getAccessToken().getTokenValue());
-                    // リクエストのContent-Typeをリソースサーバーに転送
-                    String contentType = request.getContentType();
-                    if (contentType != null) {
-                        h.setContentType(MediaType.parseMediaType(contentType));
-                    }
-                });
+            // POST/PUT/PATCH: ボディ設定
+            if (body != null && !body.isEmpty()) {
+                headersSpec = bodySpec.bodyValue(body);
+            } else {
+                headersSpec = bodySpec;
+            }
         }
+
+        // ヘッダー設定（共通）
+        headersSpec = headersSpec.headers(h -> {
+            h.setBearerAuth(client.getAccessToken().getTokenValue());
+            // リクエストのContent-Typeをリソースサーバーに転送
+            String contentType = request.getContentType();
+            if (contentType != null) {
+                h.setContentType(MediaType.parseMediaType(contentType));
+            }
+        });
 
         // リクエスト実行（ステータスコード・ヘッダー・ボディをすべて保持）
         return headersSpec
@@ -155,7 +159,9 @@ public class ApiProxyController {
                 });
 
                 // ボディを取得してレスポンスを構築
+                // 空のレスポンス（204 No Content等）の場合はdefaultIfEmptyで空文字列を設定
                 return response.bodyToMono(String.class)
+                    .defaultIfEmpty("") // 空の場合のデフォルト値
                     .map(
                         responseBody -> ResponseEntity
                             .status(statusCode)

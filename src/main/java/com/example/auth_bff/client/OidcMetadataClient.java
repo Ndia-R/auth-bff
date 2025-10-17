@@ -1,0 +1,57 @@
+package com.example.auth_bff.client;
+
+import com.example.auth_bff.dto.OidcConfiguration;
+import jakarta.annotation.PostConstruct;
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+import org.springframework.web.reactive.function.client.WebClient;
+
+/**
+ * OIDCプロバイダーのメタデータを管理するクライアント
+ *
+ * <p>アプリケーション起動時にOIDC Discoveryエンドポイントからメタデータを取得し、
+ * 必要なエンドポイントURL（例: end_session_endpoint）をキャッシュする。</p>
+ */
+@Slf4j
+@Component
+@Getter
+@RequiredArgsConstructor
+public class OidcMetadataClient {
+
+    private final WebClient webClient;
+
+    @Value("${keycloak.issuer-uri}")
+    private String issuerUri;
+
+    private String endSessionEndpoint;
+
+    /**
+     * アプリケーション起動後にOIDCメタデータを取得する。
+     * PostConstructアノテーションにより、このBeanの初期化後に一度だけ実行される。
+     */
+    @PostConstruct
+    public void fetchMetadata() {
+        String discoveryUrl = issuerUri + "/.well-known/openid-configuration";
+        log.info("Fetching OIDC metadata from: {}", discoveryUrl);
+
+        try {
+            OidcConfiguration config = webClient.get()
+                .uri(discoveryUrl)
+                .retrieve()
+                .bodyToMono(OidcConfiguration.class)
+                .block(); // 起動時に同期待ちして、必須データを取得する
+
+            if (config != null && config.getEndSessionEndpoint() != null) {
+                this.endSessionEndpoint = config.getEndSessionEndpoint();
+                log.info("Successfully fetched OIDC metadata. End session endpoint: {}", this.endSessionEndpoint);
+            } else {
+                log.error("Failed to fetch or parse end_session_endpoint from OIDC metadata.");
+            }
+        } catch (Exception e) {
+            log.error("Error fetching OIDC metadata from {}. Keycloak logout may not work.", discoveryUrl, e);
+        }
+    }
+}

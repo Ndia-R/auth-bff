@@ -12,7 +12,7 @@ import lombok.NoArgsConstructor;
  * <h3>フィールド:</h3>
  * <ul>
  *   <li><b>message</b>: ログアウト成功メッセージ（通常は "success"）</li>
- *   <li><b>warning</b>: Keycloakログアウト失敗時の警告メッセージ（成功時はnull）</li>
+ *   <li><b>warning</b>: IdPログアウト失敗時の警告メッセージ（成功時はnull）</li>
  * </ul>
  */
 @Data
@@ -27,8 +27,8 @@ public class LogoutResponse {
 
     /**
      * 警告メッセージ（オプション）
-     * Keycloakログアウトに失敗した場合のみ設定される
-     * 例: "Keycloakログアウトに失敗しました。再度お試しください。"
+     * IdPログアウトに失敗した場合のみ設定される
+     * 例: "IdPログアウトに失敗しました。再度お試しください。"
      */
     private String warning;
 

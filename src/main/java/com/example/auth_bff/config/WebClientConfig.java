@@ -28,7 +28,7 @@ import java.util.concurrent.TimeUnit;
  * <h3>使用場所:</h3>
  * <ul>
  *   <li>ApiProxyController: リソースサーバーへのプロキシリクエスト</li>
- *   <li>AuthService: Keycloakへのログアウトリクエスト</li>
+ *   <li>AuthService: IdPへのログアウトリクエスト</li>
  * </ul>
  */
 @Configuration

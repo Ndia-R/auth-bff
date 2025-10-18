@@ -24,9 +24,30 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
+    @ExceptionHandler({ RateLimitExceededException.class })
+    public ResponseEntity<Object> handleRateLimitExceeded(RateLimitExceededException ex, WebRequest request) {
+        log.warn("レート制限超過: {}", ex.getMessage());
+
+        String path = request.getDescription(false).replace("uri=", "");
+        ErrorResponse errorResponse = new ErrorResponse(
+            "TOO_MANY_REQUESTS",
+            ex.getMessage(),
+            HttpStatus.TOO_MANY_REQUESTS.value(),
+            path
+        );
+
+        return this.handleExceptionInternal(
+            ex,
+            errorResponse,
+            new HttpHeaders(),
+            HttpStatus.TOO_MANY_REQUESTS,
+            request
+        );
+    }
+
     @ExceptionHandler({ UnauthorizedException.class })
     public ResponseEntity<Object> handleUnauthorized(UnauthorizedException ex, WebRequest request) {
-        log.error("認証エラー: {}", ex.getMessage(), ex);
+        log.warn("認証エラー: {}", ex.getMessage());
 
         String path = request.getDescription(false).replace("uri=", "");
         ErrorResponse errorResponse = new ErrorResponse(
@@ -46,24 +67,24 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler({ WebClientResponseException.class })
     public ResponseEntity<Object> handleWebClientResponse(WebClientResponseException ex, WebRequest request) {
-        log.error("Keycloak通信エラー: {} - {}", ex.getStatusCode(), ex.getMessage(), ex);
+        log.error("認証サーバーとの通信エラー: {} - {}", ex.getStatusCode(), ex.getMessage(), ex);
 
         String path = request.getDescription(false).replace("uri=", "");
         String errorCode;
         String message;
         HttpStatus status;
 
-        // Keycloakからのエラーレスポンスを分析
+        // 認証サーバーからのエラーレスポンスを分析
         if (ex.getStatusCode().is4xxClientError()) {
-            errorCode = "KEYCLOAK_CLIENT_ERROR";
+            errorCode = "IDP_PROVIDER_CLIENT_ERROR";
             message = "認証サーバーとの通信でクライアントエラーが発生しました";
             status = HttpStatus.BAD_REQUEST;
         } else if (ex.getStatusCode().is5xxServerError()) {
-            errorCode = "KEYCLOAK_SERVER_ERROR";
+            errorCode = "IDP_PROVIDER_SERVER_ERROR";
             message = "認証サーバーで障害が発生しています。しばらく時間をおいて再試行してください";
             status = HttpStatus.SERVICE_UNAVAILABLE;
         } else {
-            errorCode = "KEYCLOAK_COMMUNICATION_ERROR";
+            errorCode = "IDP_PROVIDER_COMMUNICATION_ERROR";
             message = "認証サーバーとの通信でエラーが発生しました";
             status = HttpStatus.INTERNAL_SERVER_ERROR;
         }
@@ -86,11 +107,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler({ WebClientException.class })
     public ResponseEntity<Object> handleWebClient(WebClientException ex, WebRequest request) {
-        log.error("Keycloak接続エラー: {}", ex.getMessage(), ex);
+        log.error("認証サーバーへの接続エラー: {}", ex.getMessage(), ex);
 
         String path = request.getDescription(false).replace("uri=", "");
         ErrorResponse errorResponse = new ErrorResponse(
-            "KEYCLOAK_CONNECTION_ERROR",
+            "IDP_PROVIDER_CONNECTION_ERROR",
             "認証サーバーに接続できませんでした。ネットワーク接続を確認してください",
             HttpStatus.SERVICE_UNAVAILABLE.value(),
             path
@@ -165,7 +186,10 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         @NonNull HttpStatusCode statusCode,
         @NonNull WebRequest request
     ) {
-        log.error("内部例外: {} - {}", statusCode, ex.getMessage(), ex);
+        // bodyがErrorResponseの場合はログ重複を避けるため、ここではログ出力しない
+        if (!(body instanceof ErrorResponse)) {
+            log.error("内部例外: {} - {}", statusCode, ex.getMessage(), ex);
+        }
 
         // bodyがnullまたはErrorResponse以外の場合、統一されたErrorResponseを作成
         if (!(body instanceof ErrorResponse)) {
@@ -186,6 +210,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         case 403 -> "アクセスが拒否されました";
         case 404 -> "リソースが見つかりません";
         case 405 -> "許可されていないメソッドです";
+        case 429 -> "リクエスト数が制限を超えました";
         case 500 -> "内部サーバーエラーが発生しました";
         default -> "エラーが発生しました";
         };

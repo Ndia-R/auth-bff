@@ -13,7 +13,18 @@ public class OidcConfiguration {
 
     /**
      * OpenID Connect RP-Initiated LogoutのためのエンドポイントURL
-     * 例: "http://localhost:8080/realms/my-realm/protocol/openid-connect/logout"
+     *
+     * <p>このURLは {@code /.well-known/openid-configuration} から自動取得されます。
+     * IDプロバイダーごとに異なるパス構造を持ちます。</p>
+     *
+     * <p>例（Keycloak）:</p>
+     * <pre>http://localhost:8080/realms/my-realm/protocol/openid-connect/logout</pre>
+     *
+     * <p>例（Auth0）:</p>
+     * <pre>https://your-tenant.auth0.com/v2/logout</pre>
+     *
+     * <p>例（Okta）:</p>
+     * <pre>https://dev-12345678.okta.com/oauth2/default/v1/logout</pre>
      */
     @JsonProperty("end_session_endpoint")
     private String endSessionEndpoint;

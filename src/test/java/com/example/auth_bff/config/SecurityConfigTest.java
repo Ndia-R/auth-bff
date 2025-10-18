@@ -24,15 +24,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   <li>CORS設定の動作確認</li>
  * </ul>
  */
-@SpringBootTest
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 @AutoConfigureMockMvc
 @TestPropertySource(properties = {
     "app.frontend.url=http://localhost:5173",
     "app.resource-server.url=http://localhost:9000",
     "app.resource-server.timeout=30",
     "app.cors.allowed-origins=http://localhost:5173",
-    "keycloak.logout-uri=http://keycloak:8080/logout",
-    "keycloak.post-logout-redirect-uri=http://localhost:5173/logout-complete"
+    "idp.post-logout-redirect-uri=http://localhost:5173/logout-complete",
+    "rate-limit.enabled=false",
+    "spring.session.store-type=none"
 })
 class SecurityConfigTest {
 
@@ -120,7 +121,8 @@ class SecurityConfigTest {
     @Test
     void testOAuth2Endpoints_ShouldBeAccessibleWithoutAuthentication() throws Exception {
         // OAuth2認可エンドポイントへのアクセスは認証不要
-        mockMvc.perform(get("/oauth2/authorization/keycloak"))
-            .andExpect(status().is3xxRedirection()); // Keycloakへリダイレクト
+        mockMvc.perform(get("/oauth2/authorization/idp"))
+            .andExpect(status().is3xxRedirection()); // 認証サーバーへリダイレクト
     }
 }
+

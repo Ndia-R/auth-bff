@@ -1,16 +1,17 @@
 package com.example.auth_bff.config;
 
+import com.example.auth_bff.filter.FilterChainExceptionHandler;
+import com.example.auth_bff.filter.RateLimitFilter;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
-import org.springframework.security.oauth2.client.web.AuthenticatedPrincipalOAuth2AuthorizedClientRepository;
-import org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
+import org.springframework.security.web.context.SecurityContextHolderFilter;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
@@ -23,6 +24,10 @@ import java.util.Arrays;
 import org.springframework.security.oauth2.client.web.DefaultOAuth2AuthorizationRequestResolver;
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestCustomizers;
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestResolver;
+
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.util.Set;
 
 /**
  * Spring Security設定クラス
@@ -50,6 +55,12 @@ import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequest
 @EnableWebSecurity
 public class SecurityConfig {
 
+    @Autowired
+    private FilterChainExceptionHandler filterChainExceptionHandler;
+
+    @Autowired(required = false)
+    private RateLimitFilter rateLimitFilter;
+
     /**
      * フロントエンドアプリケーションのURL
      * OAuth2認証成功後のリダイレクト先として使用
@@ -73,7 +84,7 @@ public class SecurityConfig {
      *   <li><b>CSRF処理</b>: CSRFトークンの検証とCookie設定</li>
      *   <li><b>認証チェック</b>: セッションCookieからユーザー情報を取得</li>
      *   <li><b>認可チェック</b>: エンドポイントへのアクセス権限確認</li>
-     *   <li><b>OAuth2処理</b>: 未認証の場合、Keycloakへリダイレクト</li>
+     *   <li><b>OAuth2処理</b>: 未認証の場合、IdPへリダイレクト</li>
      * </ol>
      *
      * @param http Spring SecurityのHttpSecurity設定オブジェクト
@@ -84,6 +95,24 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http, OAuth2AuthorizationRequestResolver pkceResolver)
         throws Exception {
+
+        // ═══════════════════════════════════════════════════════════════
+        // フィルターチェーン例外ハンドラー: 最初に追加
+        // ═══════════════════════════════════════════════════════════════
+        // すべてのフィルターで発生した例外をキャッチし、統一されたエラーレスポンスを返す
+        // GlobalExceptionHandlerと同じErrorResponse形式を使用
+        http.addFilterBefore(filterChainExceptionHandler, SecurityContextHolderFilter.class);
+
+        // ═══════════════════════════════════════════════════════════════
+        // レート制限フィルター: FilterChainExceptionHandlerの後に追加
+        // ═══════════════════════════════════════════════════════════════
+        // SecurityContextHolderFilterの前に配置し、認証処理前にレート制限を実施
+        // これにより、過剰なリクエストを早期にブロックしてリソースを保護
+        // rate-limit.enabled=trueの場合のみ追加
+        if (rateLimitFilter != null) {
+            http.addFilterBefore(rateLimitFilter, SecurityContextHolderFilter.class);
+        }
+
         http
             // ═══════════════════════════════════════════════════════════════
             // CORS設定: フロントエンドからのクロスオリジンリクエストを許可
@@ -125,11 +154,9 @@ public class SecurityConfig {
                         "/bff/auth/logout",
 
                         // OAuth2認証開始: Spring Security標準のエンドポイント
-                        // /oauth2/authorization/keycloak → Keycloakへリダイレクト
                         "/oauth2/**",
 
-                        // OAuth2コールバック: Keycloakからの認可コード受け取り
-                        // /bff/login/oauth2/code/keycloak?code=xxx&state=xxx
+                        // OAuth2コールバック: IdPからの認可コード受け取り
                         "/bff/login/oauth2/**",
 
                         // OpenID Connect Discovery: OAuth2プロバイダーのメタデータ
@@ -145,7 +172,7 @@ public class SecurityConfig {
                     .authenticated()
             )
             // ═══════════════════════════════════════════════════════════════
-            // OAuth2ログイン設定: Keycloakとの認証フロー
+            // OAuth2ログイン設定: IdPとの認証フロー
             // ═══════════════════════════════════════════════════════════════
             .oauth2Login(
                 oauth2 -> oauth2
@@ -153,8 +180,7 @@ public class SecurityConfig {
                     // code_challenge/code_verifierを自動生成
                     .authorizationEndpoint(authz -> authz.authorizationRequestResolver(pkceResolver))
 
-                    // リダイレクションエンドポイント: Keycloakからのコールバックを受け取るパス
-                    // 例: /bff/login/oauth2/code/keycloak
+                    // リダイレクションエンドポイント: IdPからのコールバックを受け取るパス
                     .redirectionEndpoint(redirection -> redirection.baseUri("/bff/login/oauth2/code/*"))
 
                     // 認証成功ハンドラー: OAuth2認証完了後にフロントエンドへリダイレクト
@@ -176,21 +202,11 @@ public class SecurityConfig {
     /**
      * OAuth2認証成功後のカスタムハンドラー
      *
-     * <p>Keycloakでの認証完了後、このハンドラーがフロントエンドにリダイレクトします。</p>
+     * <p>IdPでの認証完了後、このハンドラーがフロントエンドにリダイレクトします。</p>
      *
-     * <h3>処理フロー:</h3>
-     * <ol>
-     *   <li>Keycloakからのコールバック受信（認可コード取得）</li>
-     *   <li>Spring Securityがトークン交換を自動実行</li>
-     *   <li>トークンをRedisセッションに保存</li>
-     *   <li><b>このハンドラーが実行</b> → フロントエンドにリダイレクト</li>
-     * </ol>
-     *
-     * <h3>リダイレクト先の決定:</h3>
-     * <ul>
-     *   <li>デフォルト: <code>${frontendUrl}/auth-callback</code></li>
-     *   <li>continueパラメータがある場合: そのURLを使用</li>
-     * </ul>
+     * <p><b>オープンリダイレクト脆弱性対策:</b>
+     * <code>continue</code> パラメータで指定されたリダイレクト先が、
+     * 安全なURL（同一ホストまたは許可されたホスト）であるかを検証します。</p>
      *
      * @return OAuth2認証成功ハンドラー
      */
@@ -200,55 +216,72 @@ public class SecurityConfig {
             // デフォルトのリダイレクト先: フロントエンドの認証コールバックページ
             String redirectUrl = frontendUrl + "/auth-callback";
 
-            // continueパラメータがある場合はそれを優先
-            // 例: /oauth2/authorization/keycloak?continue=/dashboard
-            // → 認証後に /dashboard へリダイレクト
+            // continueパラメータがある場合はそれを検証して優先
             String continueParam = request.getParameter("continue");
-            if (continueParam != null && !continueParam.isEmpty()) {
+            if (continueParam != null && !continueParam.isBlank() && isUrlSafe(continueParam)) {
                 redirectUrl = continueParam;
             }
 
             // フロントエンドにリダイレクト
-            // CSRFトークン（XSRF-TOKEN Cookie）はCsrfCookieFilterで自動設定済み
             response.sendRedirect(redirectUrl);
         };
     }
 
     /**
+     * URLが安全なリダイレクト先であるかを検証する
+     *
+     * @param url 検証するURL文字列
+     * @return 安全な場合はtrue、そうでない場合はfalse
+     */
+    private boolean isUrlSafe(String url) {
+        try {
+            // フロントエンドのホストを取得
+            String frontendHost = new URI(frontendUrl).getHost();
+            if (frontendHost == null) {
+                // 設定が不正な場合は安全側に倒す
+                return false;
+            }
+
+            // 許可するホストのリスト
+            final Set<String> allowedHosts = Set.of("localhost", frontendHost);
+
+            URI redirectUri = new URI(url);
+
+            // 1. ホストが指定されていない相対パス（例: /dashboard）は安全とみなす
+            if (redirectUri.getHost() == null) {
+                return true;
+            }
+
+            // 2. ホストが許可リストに含まれているかチェック
+            return allowedHosts.contains(redirectUri.getHost());
+
+        } catch (URISyntaxException e) {
+            // 不正な形式のURLは危険とみなし、リダイレクトを許可しない
+            return false;
+        }
+    }
+
+    /**
      * OAuth2認可クライアント情報の保存先設定
      *
-     * <p>OAuth2トークン（アクセストークン、リフレッシュトークン等）の保存先を設定します。</p>
+     * <p><b>注意:</b> Spring Boot 3.xでは、OAuth2AuthorizedClientRepositoryは自動設定されます。
+     * Spring Session + Redisを使用している場合、自動的にセッションに保存されます。</p>
      *
-     * <h3>保存される情報:</h3>
+     * <p>このBean定義は削除されました。Spring Bootの自動設定に任せています。</p>
+     *
+     * <h3>自動設定の内容:</h3>
      * <ul>
-     *   <li>アクセストークン（Resource Serverへのアクセスに使用）</li>
-     *   <li>リフレッシュトークン（アクセストークン更新に使用）</li>
-     *   <li>IDトークン（ユーザー情報、完全ログアウトに使用）</li>
-     *   <li>トークンの有効期限情報</li>
+     *   <li><b>保存先</b>: Spring Session (Redis)</li>
+     *   <li><b>保存される情報</b>: アクセストークン、リフレッシュトークン、IDトークン</li>
+     *   <li><b>タイムアウト</b>: セッションタイムアウト（30分）</li>
      * </ul>
      *
-     * <h3>保存先:</h3>
-     * <ul>
-     *   <li><b>Spring Session + Redis</b>: セッション情報として一元管理</li>
-     *   <li>RedisConfigで設定されたRedis接続を使用</li>
-     *   <li>セッションタイムアウト: 30分（application.yml）</li>
-     * </ul>
-     *
-     * <h3>認証済みユーザーとの紐付け:</h3>
-     * <p><code>AuthenticatedPrincipalOAuth2AuthorizedClientRepository</code>により、
-     * 現在ログイン中のユーザー（OAuth2User）に紐付けてトークンを保存します。</p>
-     *
-     * @param clientRegistrationRepository OAuth2クライアント登録情報（application.yml）
-     * @param authorizedClientService OAuth2認可クライアントサービス
-     * @return OAuth2認可クライアント情報のリポジトリ
+     * <p>削除理由: Spring Bootが自動的に適切な実装を提供するため、明示的なBean定義は不要。</p>
      */
-    @Bean
-    public OAuth2AuthorizedClientRepository authorizedClientRepository(
-        ClientRegistrationRepository clientRegistrationRepository,
-        OAuth2AuthorizedClientService authorizedClientService
-    ) {
-        return new AuthenticatedPrincipalOAuth2AuthorizedClientRepository(authorizedClientService);
-    }
+    // @Bean
+    // public OAuth2AuthorizedClientRepository authorizedClientRepository(...) {
+    // 削除済み - Spring Bootの自動設定を使用
+    // }
 
     /**
      * CORS（Cross-Origin Resource Sharing）設定
@@ -326,8 +359,8 @@ public class SecurityConfig {
      * <ol>
      *   <li><b>code_verifier生成</b>: ランダムな文字列を生成（43-128文字）</li>
      *   <li><b>code_challenge生成</b>: <code>BASE64URL(SHA256(code_verifier))</code></li>
-     *   <li><b>認可リクエスト</b>: code_challengeをKeycloakに送信</li>
-     *   <li><b>トークン交換</b>: code_verifierをKeycloakに送信して検証</li>
+     *   <li><b>認可リクエスト</b>: code_challengeをIdPに送信</li>
+     *   <li><b>トークン交換</b>: code_verifierをIdPに送信して検証</li>
      * </ol>
      *
      * <h3>防止できる攻撃:</h3>

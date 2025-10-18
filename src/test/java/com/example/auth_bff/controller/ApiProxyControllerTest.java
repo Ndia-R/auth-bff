@@ -31,7 +31,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Import(TestConfig.class)
 @TestPropertySource(properties = {
     "app.resource-server.url=http://localhost:9000",
-    "app.resource-server.timeout=30"
+    "app.resource-server.timeout=30",
+    "rate-limit.enabled=false"
 })
 class ApiProxyControllerTest {
 
@@ -59,7 +60,7 @@ class ApiProxyControllerTest {
         // このテストはセキュリティ設定のみ検証
         // 実際のWebClientの動作は統合テストで検証
         mockMvc.perform(get("/api/books")
-                .with(oauth2Client("keycloak")))
+                .with(oauth2Client("oidc")))
             .andExpect(status().is5xxServerError()); // WebClientがモックされていないため、実際の接続エラー
     }
 
@@ -70,7 +71,7 @@ class ApiProxyControllerTest {
     @WithMockUser
     void testProxyEndpoint_PostMethod_ShouldAcceptRequest() throws Exception {
         mockMvc.perform(post("/api/books")
-                .with(oauth2Client("keycloak"))
+                .with(oauth2Client("oidc"))
                 .contentType("application/json")
                 .content("{\"title\":\"Test Book\"}"))
             .andExpect(status().is5xxServerError()); // WebClientがモックされていないため、実際の接続エラー
@@ -83,7 +84,7 @@ class ApiProxyControllerTest {
     @WithMockUser
     void testProxyEndpoint_PutMethod_ShouldAcceptRequest() throws Exception {
         mockMvc.perform(put("/api/books/1")
-                .with(oauth2Client("keycloak"))
+                .with(oauth2Client("oidc"))
                 .contentType("application/json")
                 .content("{\"title\":\"Updated Book\"}"))
             .andExpect(status().is5xxServerError()); // WebClientがモックされていないため、実際の接続エラー
@@ -96,7 +97,7 @@ class ApiProxyControllerTest {
     @WithMockUser
     void testProxyEndpoint_DeleteMethod_ShouldAcceptRequest() throws Exception {
         mockMvc.perform(delete("/api/books/1")
-                .with(oauth2Client("keycloak")))
+                .with(oauth2Client("oidc")))
             .andExpect(status().is5xxServerError()); // WebClientがモックされていないため、実際の接続エラー
     }
 }

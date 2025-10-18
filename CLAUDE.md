@@ -13,7 +13,7 @@
 
 ## 概要
 
-KeycloakとのOAuth2認証フローを処理する**必要最小限のSpring Boot BFF (Backend for Frontend)** アプリケーションです。
+OIDC準拠の認証プロバイダー（Keycloak、Auth0、Okta等）とのOAuth2認証フローを処理する**必要最小限のSpring Boot BFF (Backend for Frontend)** アプリケーションです。
 
 ### 🎯 特徴
 
@@ -23,16 +23,18 @@ KeycloakとのOAuth2認証フローを処理する**必要最小限のSpring Boo
 
 2. **PKCE対応**: Authorization Code with PKCEによるセキュアなOAuth2認証
 
-3. **最小構成**: 13ファイルで構成された、保守しやすいシンプルな設計
+3. **最小構成**: 18ファイルで構成された、保守しやすいシンプルな設計
    - 未使用のクラス・メソッドは一切なし
    - Spring Boot自動設定を最大限活用
    - シンプルな設定管理（@Valueアノテーション）
 
 4. **完全なCSRF保護**: CookieベースのCSRFトークンで状態変更操作を保護
 
-5. **OpenID Connect準拠**: RP-Initiated Logoutによる確実なKeycloakセッション無効化
+5. **OpenID Connect準拠**: RP-Initiated Logoutによる確実なIDプロバイダーセッション無効化
 
 6. **権限制御の委譲**: BFFは認証とトークン管理に専念、権限制御はリソースサーバーで実施
+
+7. **レート制限**: Bucket4j + Redisによる分散レート制限でブルートフォース攻撃やDDoSを軽減
 
 ## アーキテクチャ
 
@@ -51,7 +53,7 @@ KeycloakとのOAuth2認証フローを処理する**必要最小限のSpring Boo
     └─ データ処理
 ```
 
-### 主要コンポーネント（最小構成・13ファイル）
+### 主要コンポーネント（最小構成・18ファイル）
 
 #### アプリケーション
 - **AuthBffApplication**: メインクラス
@@ -60,23 +62,33 @@ KeycloakとのOAuth2認証フローを処理する**必要最小限のSpring Boo
 - **WebClientConfig**: 共有WebClient設定（シングルトン、タイムアウト管理）
 - **CsrfCookieFilter**: CSRF Cookie自動設定フィルター
 - **RedisConfig**: Spring Session Data Redis設定
-- **SecurityConfig**: Spring Security設定（PKCE、CSRF保護、CORS）
+- **SecurityConfig**: Spring Security設定（PKCE、CSRF保護、CORS、フィルターチェーン例外処理）
+- **RateLimitConfig**: レート制限設定（Bucket4j + Redis）
+
+#### フィルター (filter/)
+- **FilterChainExceptionHandler**: フィルターチェーン例外ハンドラー（統一エラーレスポンス）
+- **RateLimitFilter**: レート制限フィルター（認証エンドポイント・APIプロキシ）
 
 #### コントローラー (controller/)
 - **ApiProxyController**: すべてのAPIリクエストをプロキシ（175行、1メソッドのみ）
 - **AuthController**: 認証エンドポイント（ログイン・ログアウト・ユーザー情報）
 
+#### クライアント (client/)
+- **OidcMetadataClient**: OIDC Discovery（メタデータ取得）
+
 #### DTO (dto/)
 - **ErrorResponse**: 統一エラーレスポンス（タイムスタンプ自動生成）
 - **LogoutResponse**: ログアウトレスポンス
 - **UserResponse**: ユーザー情報レスポンス
+- **OidcConfiguration**: OIDC設定情報
 
 #### 例外 (exception/)
 - **GlobalExceptionHandler**: 統一エラーハンドリング（WebClient例外対応）
 - **UnauthorizedException**: 認証エラー例外
+- **RateLimitExceededException**: レート制限超過例外
 
 #### サービス (service/)
-- **AuthService**: 認証ビジネスロジック（ログアウト、ユーザー情報取得、Keycloak連携）
+- **AuthService**: 認証ビジネスロジック（ログアウト、ユーザー情報取得、IDプロバイダー連携）
 
 ## エンドポイント
 
@@ -87,7 +99,7 @@ KeycloakとのOAuth2認証フローを処理する**必要最小限のSpring Boo
 | GET | `/bff/auth/login` | 認証状態確認・OAuth2フロー開始 | リダイレクト |
 | GET | `/bff/auth/user` | 現在のユーザー情報取得 | `UserResponse` |
 | POST | `/bff/auth/logout` | 通常ログアウト（BFFセッションのみクリア） | `LogoutResponse` |
-| POST | `/bff/auth/logout?complete=true` | 完全ログアウト（Keycloakセッションも無効化） | `LogoutResponse` |
+| POST | `/bff/auth/logout?complete=true` | 完全ログアウト（IDプロバイダーセッションも無効化） | `LogoutResponse` |
 | GET | `/actuator/health` | ヘルスチェック | Spring Boot Actuator標準レスポンス |
 
 ### APIプロキシエンドポイント
@@ -130,7 +142,7 @@ GET /api/admin/users   →  GET /admin/users    (トークン付与、権限チ�
 
 **ログアウトの種類:**
 - **通常ログアウト** (`complete=false` または省略): BFFセッションのみクリア
-- **完全ログアウト** (`complete=true`): BFFセッション + Keycloakセッションをクリア
+- **完全ログアウト** (`complete=true`): BFFセッション + IDプロバイダーセッションをクリア
 
 ### ErrorResponse
 統一的なエラーレスポンス形式。
@@ -145,12 +157,12 @@ GET /api/admin/users   →  GET /admin/users    (トークン付与、権限チ�
 }
 ```
 
-#### WebClient/Keycloak通信特有のエラーコード
+#### WebClient/IDプロバイダー通信特有のエラーコード
 | エラーコード | HTTPステータス | 説明 |
 |-------------|---------------|------|
-| `KEYCLOAK_CLIENT_ERROR` | 400 | Keycloak通信でクライアントエラー |
-| `KEYCLOAK_SERVER_ERROR` | 503 | Keycloak サーバーエラー |
-| `KEYCLOAK_CONNECTION_ERROR` | 503 | Keycloak接続エラー |
+| `IDP_CLIENT_ERROR` | 400 | IDプロバイダー通信でクライアントエラー |
+| `IDP_SERVER_ERROR` | 503 | IDプロバイダー サーバーエラー |
+| `IDP_CONNECTION_ERROR` | 503 | IDプロバイダー接続エラー |
 
 ## セキュリティ設定
 
@@ -192,9 +204,57 @@ fetch('/api/books', {
 - **資格情報**: 許可
 
 ### OAuth2設定
-- **プロバイダー**: Keycloak
+- **プロバイダー**: OIDC準拠の認証サーバー（Keycloak、Auth0、Okta等）
 - **フロー**: Authorization Code with PKCE
 - **スコープ**: openid, profile, email
+
+## レート制限
+
+### 概要
+Bucket4j + Redisによる分散レート制限を実装し、ブルートフォース攻撃やDDoS攻撃を軽減します。
+
+### レート制限ルール
+
+| エンドポイント | 制限 | 識別方法 | 目的 |
+|--------------|------|---------|------|
+| `/bff/auth/login`, `/bff/auth/user` | 30リクエスト/分 | IPアドレス | ブルートフォース攻撃防止 |
+| `/api/**` | 200リクエスト/分 | セッションID | API乱用防止 |
+
+### 除外エンドポイント（レート制限なし）
+- `/actuator/health` - 監視システムからのヘルスチェック
+- `/bff/login/oauth2/code/**` - IDプロバイダーからのコールバック
+- `/oauth2/authorization/**` - OAuth2認証開始
+- `/bff/auth/logout` - ログアウト（セッション無効化済み）
+
+### レート制限超過時のレスポンス
+```json
+{
+  "error": "TOO_MANY_REQUESTS",
+  "message": "リクエスト数が制限を超えました。しばらく待ってから再試行してください。",
+  "status": 429,
+  "path": "/bff/auth/user",
+  "timestamp": "2025-10-18 15:30:45"
+}
+```
+
+### 環境変数
+```bash
+# レート制限機能の有効/無効（デフォルト: true）
+RATE_LIMIT_ENABLED=true
+
+# 認証エンドポイントのレート制限（デフォルト: 30リクエスト/分）
+RATE_LIMIT_AUTH_RPM=30
+
+# APIプロキシのレート制限（デフォルト: 200リクエスト/分）
+RATE_LIMIT_API_RPM=200
+```
+
+### 技術詳細
+- **ライブラリ**: Bucket4j 8.7.0
+- **バックエンド**: Redis（Lettuce CAS方式）
+- **分散対応**: 複数BFFインスタンス間でレート制限状態を共有
+- **アルゴリズム**: Token Bucket（トークンバケット）
+- **補充方式**: Intervally Refill（1分ごとに全トークン補充）
 
 ## APIプロキシの詳細実装
 
@@ -226,15 +286,15 @@ fetch('/api/books', {
 ### 基本設定
 ```bash
 # ============================================
-# Keycloak Configuration
+# Identity Provider Configuration
 # ============================================
-KEYCLOAK_CLIENT_ID=my-books-client
-KEYCLOAK_CLIENT_SECRET=your-client-secret
-KEYCLOAK_REDIRECT_URI=http://localhost:8888/bff/login/oauth2/code/keycloak
+IDP_CLIENT_ID=my-books-client
+IDP_CLIENT_SECRET=your-client-secret
+IDP_REDIRECT_URI=http://localhost:8888/bff/login/oauth2/code/idp
 
-# 外部Keycloak使用（ISSUER_URIで統一）
-KEYCLOAK_ISSUER_URI=http://auth.localhost:8444/realms/test-user-realm
-KEYCLOAK_POST_LOGOUT_REDIRECT_URI=http://localhost:5173/logout-complete
+# ISSUER_URIで統一（Keycloak、Auth0、Okta等のOIDC準拠プロバイダー）
+IDP_ISSUER_URI=http://auth.localhost:8444/realms/test-user-realm
+IDP_POST_LOGOUT_REDIRECT_URI=http://localhost:5173/logout-complete
 
 # ============================================
 # Redis Configuration
@@ -258,7 +318,55 @@ CORS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:*
 RESOURCE_SERVER_TIMEOUT=30
 ```
 
-**重要**: `KEYCLOAK_ISSUER_URI`を使用することで、Spring Securityが自動的に各エンドポイント（authorize, token, jwk, logout）を検出します。個別エンドポイント指定は不要です。
+**重要**: `IDP_ISSUER_URI`を使用することで、Spring Securityが自動的に各エンドポイント（authorize, token, jwk, logout）を検出します。個別エンドポイント指定は不要です。
+
+### IDプロバイダー別 ISSUER_URI 設定例
+
+このBFFは **OIDC準拠のすべてのIDプロバイダーに対応** しています。`IDP_ISSUER_URI` の値のみを変更すれば、異なるプロバイダーに切り替え可能です。
+
+#### Keycloak
+```bash
+IDP_ISSUER_URI=http://auth.localhost:8444/realms/test-user-realm
+```
+- パス構造: `/realms/{realm-name}`
+- Keycloak特有の「レルム」概念を使用
+
+#### Auth0
+```bash
+IDP_ISSUER_URI=https://your-tenant.auth0.com
+```
+- パス構造: テナント名ベースのサブドメイン
+- 追加パスは不要
+
+#### Okta
+```bash
+IDP_ISSUER_URI=https://dev-12345678.okta.com/oauth2/default
+```
+- パス構造: `/oauth2/{authorization-server-id}`
+- `default` は認可サーバーID（カスタム可能）
+
+#### Azure AD (Microsoft Entra ID)
+```bash
+IDP_ISSUER_URI=https://login.microsoftonline.com/{tenant-id}/v2.0
+```
+- パス構造: `/{tenant-id}/v2.0`
+- テナントIDまたはテナント名を指定
+
+#### Google Identity Platform
+```bash
+IDP_ISSUER_URI=https://accounts.google.com
+```
+- 非常にシンプルな構造
+- マルチテナント不要
+
+#### AWS Cognito
+```bash
+IDP_ISSUER_URI=https://cognito-idp.{region}.amazonaws.com/{user-pool-id}
+```
+- パス構造: リージョン + ユーザープールID
+- 例: `https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_abc123def`
+
+**注意**: 上記の例はすべて OIDC Discovery（`/.well-known/openid-configuration`）をサポートしており、Spring Securityが自動的に各エンドポイントを検出します。BFFのコード変更は一切不要です。
 
 ## 開発環境
 
@@ -271,7 +379,7 @@ WSL2 (Ubuntu) → VSCode DevContainer → Docker Compose
                                           └── redis (セッションストレージ)
 ```
 
-**注意**: Keycloakは外部の認証サーバー（`https://auth.localhost`）を使用します。
+**注意**: このプロジェクトは外部の認証サーバー（`http://auth.localhost:8444`）を使用します。Keycloak、Auth0、Okta等のOIDC準拠プロバイダーに対応しています。
 
 ### DevContainer構成
 
@@ -316,11 +424,11 @@ networks: shared-network
 外部ブラウザ
     ↓ http://localhost:8888
 auth-bff:8080 ←→ redis:6379
-    ↓ http://auth.localhost:8444 (外部Keycloak)
-Keycloak (外部認証サーバー)
+    ↓ http://auth.localhost:8444 (外部IDプロバイダー)
+IDプロバイダー (外部認証サーバー: Keycloak/Auth0/Okta等)
 ```
 
-**重要**: Keycloakは外部サーバー（`http://auth.localhost:8444`）を使用します。`KEYCLOAK_ISSUER_URI`環境変数で接続先を指定してください。
+**重要**: 外部の認証サーバーを使用します。`IDP_ISSUER_URI`環境変数でOIDC準拠プロバイダーの接続先を指定してください。
 
 ### 開発環境起動
 
@@ -354,30 +462,40 @@ docker compose up -d
 
 ## プロジェクト構成
 
-### 📁 ソースコード構成（13ファイル）
+### 📁 ソースコード構成（18ファイル）
 
 ```
 src/main/java/com/example/auth_bff/
 ├── AuthBffApplication.java              # メインクラス
 │
-├── config/                              # 設定（4ファイル）
+├── config/                              # 設定（5ファイル）
 │   ├── WebClientConfig.java             # 共有WebClient設定（シングルトン）
 │   ├── CsrfCookieFilter.java           # CSRF Cookie自動設定フィルター
 │   ├── RedisConfig.java                 # Redis/Spring Session設定
-│   └── SecurityConfig.java              # Spring Security + PKCE + CORS
+│   ├── SecurityConfig.java              # Spring Security + PKCE + CORS + フィルターチェーン例外処理
+│   └── RateLimitConfig.java             # レート制限設定（Bucket4j + Redis）
+│
+├── filter/                              # フィルター（2ファイル）
+│   ├── FilterChainExceptionHandler.java # フィルターチェーン例外ハンドラー
+│   └── RateLimitFilter.java             # レート制限フィルター
 │
 ├── controller/                          # コントローラー（2ファイル）
 │   ├── ApiProxyController.java          # APIプロキシ（/api/**、175行、1メソッド）
 │   └── AuthController.java              # 認証エンドポイント（/bff/auth/*）
 │
-├── dto/                                 # DTO（3ファイル）
+├── client/                              # クライアント（1ファイル）
+│   └── OidcMetadataClient.java          # OIDC Discoveryクライアント
+│
+├── dto/                                 # DTO（4ファイル）
 │   ├── ErrorResponse.java               # 統一エラーレスポンス
 │   ├── LogoutResponse.java              # ログアウトレスポンス
-│   └── UserResponse.java                # ユーザー情報レスポンス
+│   ├── UserResponse.java                # ユーザー情報レスポンス
+│   └── OidcConfiguration.java           # OIDC設定情報
 │
-├── exception/                           # 例外（2ファイル）
+├── exception/                           # 例外（3ファイル）
 │   ├── GlobalExceptionHandler.java      # 統一エラーハンドラー
-│   └── UnauthorizedException.java       # 認証エラー例外
+│   ├── UnauthorizedException.java       # 認証エラー例外
+│   └── RateLimitExceededException.java  # レート制限超過例外
 │
 └── service/                             # サービス（1ファイル）
     └── AuthService.java                 # 認証ビジネスロジック
@@ -389,10 +507,12 @@ src/main/java/com/example/auth_bff/
 2. **BFFパターン**: フロントエンドはトークンを一切扱わない
 3. **権限制御の委譲**: BFFは認証に専念、権限はリソースサーバーが管理
 4. **Spring Boot自動設定の活用**: カスタムBean最小限
-5. **シンプルなエラーハンドリング**: 実際に発生する例外のみ処理
+5. **統一されたエラーハンドリング**: FilterChainExceptionHandlerとGlobalExceptionHandlerで一貫したエラーレスポンス
 6. **1メソッドプロキシ**: ApiProxyControllerは175行、1メソッドのみ
 7. **シンプルな設定管理**: @Valueアノテーションで直接的に設定値を取得
 8. **WebClientシングルトン**: コネクションプール再利用によるパフォーマンス向上
+9. **分散レート制限**: Redis + Bucket4jで複数インスタンス間でレート制限を共有
+10. **フィルターチェーン例外処理**: Spring Securityフィルターチェーン内の例外も統一されたErrorResponse形式で返却
 
 ## 開発時の注意点
 
@@ -404,20 +524,63 @@ src/main/java/com/example/auth_bff/
 - **アノテーション活用**: `@NonNull` で明示的なnull制約
 
 ### エラーハンドリング
+
+#### コントローラー内の例外
 - 認証エラー: `UnauthorizedException`
-- Keycloak通信エラー: `WebClientException`, `WebClientResponseException`
+- IDプロバイダー通信エラー: `WebClientException`, `WebClientResponseException`
 - その他一般エラー: `Exception`
 - すべて`GlobalExceptionHandler`で統一処理
 
+#### フィルターチェーン内の例外
+- レート制限超過: `RateLimitExceededException`
+- その他フィルター例外: `Exception`
+- すべて`FilterChainExceptionHandler`で統一処理
+
+#### 統一されたエラーレスポンス形式
+両方のハンドラーが同じ`ErrorResponse` DTOを使用し、一貫したエラーレスポンスを返却します。
+
 ### テスト
+
+#### テストファイル構成
+```
+src/test/java/com/example/auth_bff/
+├── config/
+│   ├── SecurityConfigTest.java          # セキュリティ設定の統合テスト
+│   └── TestConfig.java                  # テスト用設定クラス
+│
+├── controller/
+│   └── ApiProxyControllerTest.java      # APIプロキシの単体テスト
+│
+├── filter/
+│   └── RateLimitIntegrationTest.java    # レート制限の統合テスト
+│
+└── service/
+    └── AuthServiceTest.java             # 認証サービスの単体テスト
+```
+
+#### テストカバレッジ
+- **全26テスト**: すべて成功
+- **単体テスト**: サービス層、コントローラー層
+- **統合テスト**: セキュリティ設定、レート制限（Redis連携）
+
+#### テスト実行
 ```bash
-# 単体テスト
+# すべてのテスト実行
 ./gradlew test
 
-# 結合テスト（要Redis起動）
+# 特定のテストクラスのみ実行
+./gradlew test --tests RateLimitIntegrationTest
+
+# Redis起動が必要な統合テスト
 docker compose up redis -d
 ./gradlew test
 ```
+
+#### レート制限テストの特徴
+- **実際のRedisと連携**: テスト用のRedisを使用して、実環境に近い統合テスト
+- **IPアドレスベースの制限**: 認証エンドポイントはIPアドレスで識別
+- **除外エンドポイントの検証**: ヘルスチェック、OAuth2関連のエンドポイントは制限なし
+- **429エラーレスポンスの検証**: ErrorResponse形式のJSONレスポンスを確認
 
 ## トラブルシューティング
 
@@ -427,16 +590,16 @@ docker compose up redis -d
    - `SecurityConfig.corsConfigurationSource()` で許可オリジンを確認
 
 2. **認証ループ**
-   - Keycloak設定のリダイレクトURI確認
+   - IDプロバイダー設定のリダイレクトURI確認
    - `application.yml` の OAuth2設定確認
 
 3. **セッション問題**
    - Redis接続確認
    - Cookie設定（Secure属性）確認
 
-4. **Keycloak接続問題**
-   - `KEYCLOAK_ISSUER_URI`が正しく設定されているか確認
-   - 外部Keycloakサーバーにアクセス可能か確認
+4. **IDプロバイダー接続問題**
+   - `IDP_ISSUER_URI`が正しく設定されているか確認
+   - 外部認証サーバーにアクセス可能か確認
 
 ## API使用例（BFFパターン）
 
@@ -501,19 +664,22 @@ fetch('/api/books', {
 
 このプロジェクトは大幅なリファクタリングを経て、以下の改善が実施されました。
 
-### ✅ Keycloak設定のシンプル化
+### ✅ IDプロバイダー設定のシンプル化
 
-#### 導入前（個別エンドポイント指定）
+#### 導入前（Keycloak - 個別エンドポイント指定方式）
 ```yaml
-KEYCLOAK_AUTHORIZE_URI=http://localhost:8180/realms/test-user-realm/protocol/openid-connect/auth
-KEYCLOAK_TOKEN_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/token
-KEYCLOAK_JWK_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/certs
-KEYCLOAK_LOGOUT_URI=http://keycloak:8080/realms/test-user-realm/protocol/openid-connect/logout
+# Keycloak特有のパス構造で個別エンドポイントを指定
+IDP_AUTHORIZE_URI=http://localhost:8180/realms/test-user-realm/protocol/openid-connect/auth
+IDP_TOKEN_URI=http://idp:8080/realms/test-user-realm/protocol/openid-connect/token
+IDP_JWK_URI=http://idp:8080/realms/test-user-realm/protocol/openid-connect/certs
+IDP_LOGOUT_URI=http://idp:8080/realms/test-user-realm/protocol/openid-connect/logout
 ```
+**注**: `/realms/` と `/protocol/openid-connect/` はKeycloak固有のパス構造
 
-#### 導入後（issuer-uri統一）
+#### 導入後（OIDC Discovery - すべてのプロバイダー対応）
 ```yaml
-KEYCLOAK_ISSUER_URI=http://auth.localhost:8444/realms/test-user-realm
+# Keycloakの例（他のプロバイダーでも同じ仕組み）
+IDP_ISSUER_URI=http://auth.localhost:8444/realms/test-user-realm
 ```
 
 **改善効果:**
@@ -552,21 +718,48 @@ public WebClient webClient() {
 - パフォーマンス向上（Keep-Alive接続）
 - リソース効率の大幅改善
 
-### ✅ エラーハンドリングの充実
+### ✅ エラーハンドリングの充実と統一化
 
 #### 追加されたエラー処理
-- `WebClientResponseException`: Keycloak通信のHTTPエラー
-- `WebClientException`: Keycloak接続エラー
+- `WebClientResponseException`: IDプロバイダー通信のHTTPエラー
+- `WebClientException`: IDプロバイダー接続エラー
+- `RateLimitExceededException`: レート制限超過エラー
 - バリデーションエラーの詳細メッセージ
+
+#### フィルターチェーン例外ハンドラーの導入
+**設計の課題:**
+- Spring Securityフィルターチェーン内の例外は`@RestControllerAdvice`では捕捉できない
+- レート制限フィルター内で直接JSONレスポンスを生成すると、GlobalExceptionHandlerと重複
+
+**解決策:**
+```java
+FilterChainExceptionHandler（フィルター内例外）
+     ↓
+ErrorResponse（統一形式）
+     ↓
+JSONレスポンス
+
+GlobalExceptionHandler（コントローラー内例外）
+     ↓
+ErrorResponse（統一形式）
+     ↓
+JSONレスポンス
+```
+
+**改善効果:**
+- ✅ すべての例外で統一されたErrorResponse形式
+- ✅ エラーレスポンス生成ロジックの一元化
+- ✅ ObjectMapperによる安全なJSON生成
+- ✅ 保守性・拡張性の向上
 
 #### エラーレスポンスの統一化
 ```json
 {
-  "error": "KEYCLOAK_SERVER_ERROR",
-  "message": "認証サーバーで障害が発生しています",
-  "status": 503,
-  "path": "/bff/auth/logout",
-  "timestamp": "2025-10-13 10:30:45"
+  "error": "TOO_MANY_REQUESTS",
+  "message": "リクエスト数が制限を超えました。しばらく待ってから再試行してください。",
+  "status": 429,
+  "path": "/bff/auth/user",
+  "timestamp": "2025-10-18 14:30:45"
 }
 ```
 
@@ -578,15 +771,32 @@ public WebClient webClient() {
 - **使用箇所**: どこから呼ばれるのか
 - **注意点**: 気をつけるべきポイント
 
+### ✅ レート制限機能の追加
+
+#### 追加されたコンポーネント
+- **RateLimitConfig**: Bucket4j + Redis設定
+- **RateLimitFilter**: レート制限フィルター（認証エンドポイント・APIプロキシ）
+- **FilterChainExceptionHandler**: フィルターチェーン例外ハンドラー
+- **RateLimitExceededException**: レート制限超過例外
+- **RateLimitIntegrationTest**: レート制限の統合テスト（7テストケース）
+
+#### 機能
+- 認証エンドポイント: 30リクエスト/分（IPアドレスベース）
+- APIプロキシ: 200リクエスト/分（セッションIDベース）
+- ブルートフォース攻撃・DDoS攻撃の軽減
+- Redis + Bucket4jによる分散レート制限
+
 ### 📊 改善サマリー
 
 | 項目 | 改善前 | 改善後 | 効果 |
 |------|--------|--------|------|
-| ファイル数 | 12ファイル | 13ファイル | 必要最小限に最適化 |
-| Keycloak設定 | 個別エンドポイント指定 | issuer-uri統一 | 設定がシンプルに |
+| ファイル数 | 12ファイル | 18ファイル | 必要最小限に最適化 |
+| IDプロバイダー設定 | 個別エンドポイント指定 | issuer-uri統一 | 設定がシンプルに |
 | 設定管理 | 複雑な設定クラス | @Value統一 | シンプルで直感的 |
 | WebClient | リクエストごと作成 | シングルトン | 性能向上 |
-| エラー処理 | 基本的な処理のみ | WebClient例外対応 | 障害対応力向上 |
+| エラー処理 | 基本的な処理のみ | 統一されたエラーハンドリング | 障害対応力向上、保守性向上 |
+| レート制限 | なし | Bucket4j + Redis | セキュリティ強化 |
+| テスト | 基本的なテストのみ | 26テスト（統合テスト含む） | 品質保証 |
 | ドキュメント | 簡易コメント | 詳細Javadoc | 保守性向上 |
 
 ---

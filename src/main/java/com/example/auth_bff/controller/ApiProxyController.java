@@ -89,7 +89,7 @@ public class ApiProxyController {
      */
     @RequestMapping("/**")
     public ResponseEntity<String> proxyAll(
-        @RegisteredOAuth2AuthorizedClient("keycloak") OAuth2AuthorizedClient client,
+        @RegisteredOAuth2AuthorizedClient("idp") OAuth2AuthorizedClient client,
         HttpServletRequest request,
         @RequestBody(required = false) String body
     ) {

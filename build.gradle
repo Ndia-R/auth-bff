@@ -41,7 +41,11 @@ dependencies {
 
 	// External Libraries
 	implementation 'org.springframework.session:spring-session-data-redis'
-	
+
+	// Rate Limiting
+	implementation 'com.bucket4j:bucket4j-core:8.7.0'
+	implementation 'com.bucket4j:bucket4j-redis:8.7.0'
+
 	// Compile Only
 	compileOnly 'org.projectlombok:lombok'
 

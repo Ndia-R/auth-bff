@@ -35,7 +35,7 @@ import static org.mockito.Mockito.*;
  * <h3>テストケース:</h3>
  * <ul>
  *   <li>ログアウト処理（セッション無効化・Cookie削除）</li>
- *   <li>完全ログアウト処理（Keycloak連携）</li>
+ *   <li>完全ログアウト処理（IdP連携）</li>
  *   <li>ユーザー情報取得</li>
  *   <li>未認証時のエラーハンドリング</li>
  * </ul>
@@ -83,11 +83,13 @@ class AuthServiceTest {
         // Assert
         assertThat(result.getMessage()).isEqualTo("success");
         verify(session).invalidate();
-        verify(response).addCookie(argThat(cookie ->
-            cookie.getName().equals("BFFSESSIONID") &&
-            cookie.getMaxAge() == 0 &&
-            cookie.isHttpOnly()
-        ));
+        verify(response).addCookie(
+            argThat(
+                cookie -> cookie.getName().equals("BFFSESSIONID") &&
+                    cookie.getMaxAge() == 0 &&
+                    cookie.isHttpOnly()
+            )
+        );
     }
 
     /**
@@ -108,11 +110,11 @@ class AuthServiceTest {
     }
 
     /**
-     * テスト: 完全ログアウト（Keycloak連携）
+     * テスト: 完全ログアウト（IdP連携）
      * 注: 実際のWebClient呼び出しはモック化が複雑なため、基本動作のみ検証
      */
     @Test
-    void testLogout_WithComplete_ShouldAttemptKeycloakLogout() {
+    void testLogout_WithComplete_ShouldAttemptIdPLogout() {
         // Arrange
         when(request.getSession(false)).thenReturn(session);
 
@@ -136,7 +138,7 @@ class AuthServiceTest {
         // Assert
         assertThat(result.getMessage()).isEqualTo("success");
         verify(session).invalidate();
-        // Keycloakへのリクエストは実際には送信されない（WebClientがモック）
+        // IdPへのリクエストは実際には送信されない（WebClientがモック）
     }
 
     /**

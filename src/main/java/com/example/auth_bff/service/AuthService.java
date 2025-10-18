@@ -27,11 +27,11 @@ import jakarta.servlet.http.HttpSession;
  * 認証サービス
  *
  * <p>BFFの認証関連ビジネスロジックを提供する。
- * ログアウト処理、ユーザー情報取得、Keycloakとの連携を担当。
+ * ログアウト処理、ユーザー情報取得、OIDCプロバイダーとの連携を担当。
  *
  * <h3>WebClient利用</h3>
  * <p>WebClientはWebClientConfigで定義されたシングルトンBeanを使用。
- * Keycloakへのログアウトリクエストでコネクションプールを再利用。
+ * OIDCプロバイダーへのログアウトリクエストでコネクションプールを再利用。
  */
 @Slf4j
 @Service
@@ -41,7 +41,7 @@ public class AuthService {
     private final WebClient webClient;
     private final OidcMetadataClient oidcMetadataClient;
 
-    @Value("${keycloak.post-logout-redirect-uri}")
+    @Value("${idp.post-logout-redirect-uri}")
     private String postLogoutRedirectUri;
 
     // ===========================================
@@ -53,7 +53,7 @@ public class AuthService {
      * @param request HTTPリクエスト
      * @param response HTTPレスポンス
      * @param principal 認証済みユーザー情報
-     * @param complete 完全ログアウト（Keycloakセッションも無効化）するかどうか
+     * @param complete 完全ログアウト（OIDCプロバイダーのセッションも無効化）するかどうか
      * @return ログアウト情報
      */
     public LogoutResponse logout(
@@ -67,17 +67,17 @@ public class AuthService {
         clearSecurityContext();
         clearAuthenticationCookies(response);
 
-        // Keycloakログアウト処理（完全ログアウト時のみ）
-        boolean keycloakLogoutSuccess = true;
+        // OIDCプロバイダーのログアウト処理（完全ログアウト時のみ）
+        boolean oidcLogoutSuccess = true;
         if (complete) {
-            keycloakLogoutSuccess = processKeycloakLogout(principal);
+            oidcLogoutSuccess = processOidcLogout(principal);
         }
 
-        // Keycloakログアウトに失敗した場合、警告メッセージを含める
-        if (complete && !keycloakLogoutSuccess) {
+        // OIDCプロバイダーのログアウトに失敗した場合、警告メッセージを含める
+        if (complete && !oidcLogoutSuccess) {
             return new LogoutResponse(
                 "success",
-                "Keycloakログアウトに失敗しました。認証サーバー側のセッションが残っている可能性があります。"
+                "認証サーバーのログアウトに失敗しました。認証サーバー側のセッションが残っている可能性があります。"
             );
         }
 
@@ -160,38 +160,38 @@ public class AuthService {
     }
 
     /**
-     * Keycloakログアウト処理を実行する（OpenID Connect RP-Initiated Logout方式）
+     * OIDCプロバイダーのログアウト処理を実行する（OpenID Connect RP-Initiated Logout方式）
      *
      * <p><b>重要な設計方針:</b></p>
      * <ul>
-     *   <li>Keycloakへの通知が失敗しても、BFFのログアウト処理は成功とみなす</li>
+     *   <li>認証サーバーへの通知が失敗しても、BFFのログアウト処理は成功とみなす</li>
      *   <li>理由: ユーザーのBFFセッションは既に無効化済みであり、
-     *       Keycloak側のエラーでログアウトを妨げるべきではないため</li>
+     *       認証サーバー側のエラーでログアウトを妨げるべきではないため</li>
      *   <li>エラーは警告ログに記録され、呼び出し元に失敗を通知する</li>
      * </ul>
      *
      * @param principal 認証済みユーザー情報
-     * @return Keycloakログアウトが成功した場合はtrue、失敗した場合はfalse
+     * @return OIDCプロバイダーのログアウトが成功した場合はtrue、失敗した場合はfalse
      */
-    private boolean processKeycloakLogout(OAuth2User principal) {
+    private boolean processOidcLogout(OAuth2User principal) {
         try {
             // OidcUserでない場合はスキップ
             if (!(principal instanceof OidcUser)) {
-                log.debug("Principal is not an OidcUser, skipping Keycloak logout");
+                log.debug("Principal is not an OidcUser, skipping OIDC provider logout");
                 return true; // エラーではないのでtrueを返す
             }
 
             OidcUser oidcUser = (OidcUser) principal;
             String idToken = oidcUser.getIdToken().getTokenValue();
             if (idToken == null) {
-                log.debug("No ID token found, skipping Keycloak logout");
+                log.debug("No ID token found, skipping OIDC provider logout");
                 return true; // エラーではないのでtrueを返す
             }
 
             // OIDC Discoveryから取得したend_session_endpointを使用してログアウトURLを構築
             String logoutUri = oidcMetadataClient.getEndSessionEndpoint();
             if (logoutUri == null || logoutUri.isBlank()) {
-                log.warn("OIDC end_session_endpoint is not available. Skipping Keycloak logout.");
+                log.warn("OIDC end_session_endpoint is not available. Skipping OIDC provider logout.");
                 return false; // ログアウトエンドポイントがなければ失敗とみなす
             }
 
@@ -202,9 +202,9 @@ public class AuthService {
                 .build()
                 .toUriString();
 
-            log.debug("Initiating Keycloak logout: {}", endSessionUrl);
+            log.debug("Initiating OIDC provider logout: {}", endSessionUrl);
 
-            // GETリクエストでKeycloakログアウト（OpenID Connect仕様準拠）
+            // GETリクエストでOIDCプロバイダーのログアウトを実行（OpenID Connect仕様準拠）
             webClient.get()
                 .uri(endSessionUrl)
                 .exchangeToMono(clientResponse -> {
@@ -212,30 +212,30 @@ public class AuthService {
                         clientResponse.statusCode().is3xxRedirection()) {
                         return clientResponse.bodyToMono(String.class);
                     } else {
-                        log.error("Keycloak logout failed with status: {}", clientResponse.statusCode());
+                        log.error("OIDC provider logout failed with status: {}", clientResponse.statusCode());
                         return clientResponse.bodyToMono(String.class)
                             .then(
                                 Mono.error(
-                                    new RuntimeException("Keycloak logout failed with " + clientResponse.statusCode())
+                                    new RuntimeException("OIDC provider logout failed with " + clientResponse.statusCode())
                                 )
                             );
                     }
                 })
                 .block();
 
-            log.info("Keycloak logout completed");
+            log.info("OIDC provider logout completed");
             return true; // 成功
 
         } catch (WebClientResponseException e) {
-            log.warn("Keycloak logout failed ({}), but BFF logout will continue", e.getStatusCode());
+            log.warn("OIDC provider logout failed ({}), but BFF logout will continue", e.getStatusCode());
             return false; // 失敗
 
         } catch (WebClientException e) {
-            log.warn("Could not connect to Keycloak for logout, but BFF logout will continue");
+            log.warn("Could not connect to OIDC provider for logout, but BFF logout will continue");
             return false; // 失敗
 
         } catch (Exception e) {
-            log.warn("Keycloak logout error: {}, but BFF logout will continue", e.getMessage());
+            log.warn("OIDC provider logout error: {}, but BFF logout will continue", e.getMessage());
             return false; // 失敗
         }
     }

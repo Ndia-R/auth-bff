@@ -23,7 +23,7 @@ public class OidcMetadataClient {
 
     private final WebClient webClient;
 
-    @Value("${keycloak.issuer-uri}")
+    @Value("${idp.issuer-uri}")
     private String issuerUri;
 
     private String endSessionEndpoint;
@@ -51,7 +51,7 @@ public class OidcMetadataClient {
                 log.error("Failed to fetch or parse end_session_endpoint from OIDC metadata.");
             }
         } catch (Exception e) {
-            log.error("Error fetching OIDC metadata from {}. Keycloak logout may not work.", discoveryUrl, e);
+            log.error("Error fetching OIDC metadata from {}. OIDC provider logout may not work.", discoveryUrl, e);
         }
     }
 }

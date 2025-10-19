@@ -59,9 +59,15 @@
       "Bash(UV_PYTHON=python3 /home/vscode/.local/bin/uvx:*)",
       "Bash(find:*)",
       "Bash(rm:*)",
-      "Bash(xargs -r kill -9)"
+      "Bash(xargs -r kill -9)",
+      "Bash(code --list-extensions)"
     ],
     "deny": [],
     "ask": []
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "serena",
+    "context7"
+  ]
 }

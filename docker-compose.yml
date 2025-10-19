@@ -1,5 +1,6 @@
 services:
   auth-bff:
+    container_name: auth-bff
     build:
       context: .
       dockerfile: Dockerfile
@@ -29,6 +30,7 @@ services:
       - .:/workspace
       - gradle-cache:/home/vscode/.gradle
       - claude-config:/home/vscode/.claude
+      - gemini-config:/home/vscode/.gemini
     extra_hosts:
       - "auth.localhost:host-gateway"
     depends_on:
@@ -38,6 +40,7 @@ services:
     command: sleep infinity
 
   redis:
+    container_name: redis
     image: redis:8.2
     ports:
       - 6379:6379
@@ -47,7 +50,8 @@ services:
 volumes:
   gradle-cache:
   claude-config:
+  gemini-config:
 
 networks:
   shared-network:
-    driver: bridge
+    external: true

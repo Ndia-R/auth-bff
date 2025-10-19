@@ -160,14 +160,19 @@ public class SecurityConfig {
                         "/bff/login/oauth2/**",
 
                         // OpenID Connect Discovery: OAuth2プロバイダーのメタデータ
-                        "/.well-known/**"
+                        "/.well-known/**",
+
+                        // APIプロキシ: 認証・権限チェックはリソースサーバー側で実施
+                        // BFFは認証状態に関わらずすべてのリクエストをプロキシする
+                        // 未認証の場合はトークンなしでリソースサーバーへ転送
+                        "/api/**"
                     )
                     .permitAll()
 
                     // ────────────────────────────────────────────────────
                     // 上記以外のすべてのリクエストは認証必須
                     // ────────────────────────────────────────────────────
-                    // /bff/auth/user, /bff/auth/login, /api/** など
+                    // /bff/auth/user, /bff/auth/login など
                     .anyRequest()
                     .authenticated()
             )

@@ -106,10 +106,12 @@ class RateLimitIntegrationTest {
     void testAuthEndpoint_WithinLimit_ShouldSucceed() throws Exception {
         // 5リクエスト（制限値）まではすべて成功
         // 独立したIPアドレスを使用して他のテストと干渉しないようにする
+        String uniqueIp = "10.1.1.1";  // 他のテストと完全に異なるIP範囲
+
         for (int i = 0; i < 5; i++) {
             mockMvc.perform(get("/bff/auth/user")
                     .with(request -> {
-                        request.setRemoteAddr("192.168.100.1");
+                        request.setRemoteAddr(uniqueIp);
                         return request;
                     }))
                 .andExpect(status().is3xxRedirection()); // 未認証なのでリダイレクト
@@ -122,13 +124,13 @@ class RateLimitIntegrationTest {
     @Test
     void testAuthEndpoint_ExceedsLimit_ShouldReturn429() throws Exception {
         // 独立したIPアドレスを使用して他のテストと干渉しないようにする
-        String testIp = "192.168.100.2";
+        String uniqueIp = "10.2.2.2";  // 他のテストと完全に異なるIP範囲
 
         // 最初の5リクエストは成功
         for (int i = 0; i < 5; i++) {
             mockMvc.perform(get("/bff/auth/user")
                     .with(request -> {
-                        request.setRemoteAddr(testIp);
+                        request.setRemoteAddr(uniqueIp);
                         return request;
                     }))
                 .andExpect(status().is3xxRedirection());
@@ -137,7 +139,7 @@ class RateLimitIntegrationTest {
         // 6リクエスト目はレート制限超過で429エラー
         mockMvc.perform(get("/bff/auth/user")
                 .with(request -> {
-                    request.setRemoteAddr(testIp);
+                    request.setRemoteAddr(uniqueIp);
                     return request;
                 }))
             .andExpect(status().isTooManyRequests())
@@ -151,11 +153,12 @@ class RateLimitIntegrationTest {
      */
     @Test
     void testAuthEndpoint_DifferentIPs_ShouldHaveIndependentLimits() throws Exception {
-        // IP1: 192.168.100.10
+        // IP1: 10.3.3.3 - 他のテストと完全に異なるIP範囲
+        String uniqueIp1 = "10.3.3.3";
         for (int i = 0; i < 5; i++) {
             mockMvc.perform(get("/bff/auth/user")
                     .with(request -> {
-                        request.setRemoteAddr("192.168.100.10");
+                        request.setRemoteAddr(uniqueIp1);
                         return request;
                     }))
                 .andExpect(status().is3xxRedirection());
@@ -164,15 +167,16 @@ class RateLimitIntegrationTest {
         // IP1: 6リクエスト目は制限超過
         mockMvc.perform(get("/bff/auth/user")
                 .with(request -> {
-                    request.setRemoteAddr("192.168.100.10");
+                    request.setRemoteAddr(uniqueIp1);
                     return request;
                 }))
             .andExpect(status().isTooManyRequests());
 
-        // IP2: 192.168.100.20 - 独立したレート制限なので成功
+        // IP2: 10.3.3.4 - 独立したレート制限なので成功
+        String uniqueIp2 = "10.3.3.4";
         mockMvc.perform(get("/bff/auth/user")
                 .with(request -> {
-                    request.setRemoteAddr("192.168.100.20");
+                    request.setRemoteAddr(uniqueIp2);
                     return request;
                 }))
             .andExpect(status().is3xxRedirection());

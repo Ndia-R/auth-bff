@@ -17,5 +17,5 @@
       ]
     }
   },
-  "postCreateCommand": "./gradlew --version"
+  "postCreateCommand": "./gradlew --version && sudo chown -R vscode:vscode /home/vscode/.claude && sudo chown -R vscode:vscode /home/vscode/.gemini"
 }

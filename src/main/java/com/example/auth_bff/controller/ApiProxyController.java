@@ -8,8 +8,11 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
-import org.springframework.security.oauth2.client.annotation.RegisteredOAuth2AuthorizedClient;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.util.UriBuilder;
@@ -28,12 +31,14 @@ import java.util.Set;
  * <ul>
  *   <li>トークンをフロントエンドから隠蔽し、BFF側で管理</li>
  *   <li>認証済みユーザーのアクセストークンを自動的に付与</li>
+ *   <li>未認証ユーザーのリクエストはトークンなしでリソースサーバーへ転送</li>
  *   <li>リソースサーバーのレスポンスを透過的に転送</li>
  * </ul>
  *
  * <h3>権限制御</h3>
- * <p>権限制御はリソースサーバー側で行う。BFFは認証済みユーザーのリクエストを
- * そのまま転送し、リソースサーバーが適切に権限チェックを実施する。
+ * <p>権限制御はリソースサーバー側で行う。BFFは認証・未認証に関わらず
+ * すべてのリクエストを転送し、リソースサーバーが適切に権限チェックを実施する。
+ * 認証が必要なエンドポイントにアクセスした場合、リソースサーバーが401を返す。
  *
  * <h3>WebClient利用</h3>
  * <p>WebClientはWebClientConfigで定義されたシングルトンBeanを使用。
@@ -46,6 +51,7 @@ import java.util.Set;
 public class ApiProxyController {
 
     private final WebClient webClient;
+    private final OAuth2AuthorizedClientService authorizedClientService;
 
     @Value("${app.resource-server.url}")
     private String resourceServerUrl;
@@ -67,29 +73,32 @@ public class ApiProxyController {
      * すべてのAPIリクエストをリソースサーバーにプロキシ
      *
      * <p>このエンドポイントは /api/** 配下のすべてのリクエストを受け付け、
-     * 認証済みユーザーのアクセストークンを付与してリソースサーバーに転送する。
+     * リソースサーバーに転送する。認証済みの場合のみアクセストークンを付与する。
      *
      * <h3>処理フロー</h3>
      * <ol>
      *   <li>リクエストパスからHTTPメソッドとパスを取得</li>
      *   <li>UriBuilderで安全なURIを構築（クエリパラメータ自動エンコード）</li>
-     *   <li>アクセストークンとContent-Typeヘッダーを設定</li>
+     *   <li>認証状態を確認し、認証済みの場合のみアクセストークンを設定</li>
+     *   <li>Content-Typeヘッダーを設定</li>
      *   <li>リソースサーバーにリクエストを転送（30秒タイムアウト）</li>
      *   <li>レスポンスのステータスコード・ヘッダー・ボディを保持して返却</li>
      * </ol>
      *
-     * <h3>権限制御</h3>
-     * <p>権限制御はリソースサーバー側で行われる。BFFは認証されたユーザーの
-     * リクエストを転送するのみで、エンドポイントごとの権限チェックは行わない。
+     * <h3>認証・権限制御</h3>
+     * <ul>
+     *   <li>認証チェック: BFFでは行わない（リソースサーバーに委譲）</li>
+     *   <li>権限チェック: リソースサーバー側で実施</li>
+     *   <li>未認証の場合: トークンなしでリソースサーバーへ転送</li>
+     *   <li>認証済みの場合: アクセストークンを付与してリソースサーバーへ転送</li>
+     * </ul>
      *
-     * @param client OAuth2認証済みクライアント（アクセストークンを含む）
      * @param request HTTPリクエスト
      * @param body リクエストボディ（GET/DELETEの場合はnull）
      * @return リソースサーバーからのレスポンス（ステータスコード・ヘッダー・ボディ）
      */
     @RequestMapping("/**")
     public ResponseEntity<String> proxyAll(
-        @RegisteredOAuth2AuthorizedClient("idp") OAuth2AuthorizedClient client,
         HttpServletRequest request,
         @RequestBody(required = false) String body
     ) {
@@ -133,9 +142,32 @@ public class ApiProxyController {
             }
         }
 
+        // 認証状態を確認
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        final boolean isAuthenticated = authentication != null
+            && authentication.isAuthenticated()
+            && !(authentication instanceof AnonymousAuthenticationToken);
+        final String principalName = (authentication != null && isAuthenticated) ? authentication.getName() : null;
+
         // ヘッダー設定（共通）
         headersSpec = headersSpec.headers(h -> {
-            h.setBearerAuth(client.getAccessToken().getTokenValue());
+            // 認証済みの場合のみアクセストークンを付与
+            if (isAuthenticated && principalName != null) {
+                OAuth2AuthorizedClient client = authorizedClientService.loadAuthorizedClient(
+                    "idp",
+                    principalName
+                );
+
+                if (client != null && client.getAccessToken() != null) {
+                    h.setBearerAuth(client.getAccessToken().getTokenValue());
+                    log.debug("Access token added for authenticated user: {}", principalName);
+                } else {
+                    log.warn("Authenticated user {} has no access token", principalName);
+                }
+            } else {
+                log.debug("Anonymous request - no access token added");
+            }
+
             // リクエストのContent-Typeをリソースサーバーに転送
             String contentType = request.getContentType();
             if (contentType != null) {

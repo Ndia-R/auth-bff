@@ -12,6 +12,11 @@ RUN apt-get update && \
 # vscodeユーザーを作成
 RUN useradd -m vscode
 
+# vscodeユーザーがパスワードなしでsudoを使えるように設定
+# /etc/sudoers.d/vscodeファイルを作成し、NOPASSWD: ALL を設定
+RUN echo "vscode ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/vscode && \
+    chmod 0440 /etc/sudoers.d/vscode
+
 # vscodeユーザーに切り替え
 USER vscode
 WORKDIR /workspace

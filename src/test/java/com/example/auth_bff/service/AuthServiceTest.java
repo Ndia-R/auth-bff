@@ -2,8 +2,6 @@ package com.example.auth_bff.service;
 
 import com.example.auth_bff.client.OidcMetadataClient;
 import com.example.auth_bff.dto.LogoutResponse;
-import com.example.auth_bff.dto.UserResponse;
-import com.example.auth_bff.exception.UnauthorizedException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
@@ -24,7 +22,6 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
 /**
@@ -36,8 +33,6 @@ import static org.mockito.Mockito.*;
  * <ul>
  *   <li>ログアウト処理（セッション無効化・Cookie削除）</li>
  *   <li>完全ログアウト処理（IdP連携）</li>
- *   <li>ユーザー情報取得</li>
- *   <li>未認証時のエラーハンドリング</li>
  * </ul>
  */
 @ExtendWith(MockitoExtension.class)
@@ -139,35 +134,5 @@ class AuthServiceTest {
         assertThat(result.getMessage()).isEqualTo("success");
         verify(session).invalidate();
         // IdPへのリクエストは実際には送信されない（WebClientがモック）
-    }
-
-    /**
-     * テスト: ユーザー情報取得
-     */
-    @Test
-    void testGetUserInfo_ShouldReturnUserResponse() {
-        // Arrange
-        when(oAuth2User.getAttribute("name")).thenReturn("田中太郎");
-        when(oAuth2User.getAttribute("email")).thenReturn("tanaka@example.com");
-        when(oAuth2User.getAttribute("preferred_username")).thenReturn("tanaka");
-
-        // Act
-        UserResponse result = authService.getUserInfo(oAuth2User);
-
-        // Assert
-        assertThat(result.getName()).isEqualTo("田中太郎");
-        assertThat(result.getEmail()).isEqualTo("tanaka@example.com");
-        assertThat(result.getPreferredUsername()).isEqualTo("tanaka");
-    }
-
-    /**
-     * テスト: 未認証ユーザーのユーザー情報取得
-     */
-    @Test
-    void testGetUserInfo_WhenPrincipalIsNull_ShouldThrowUnauthorizedException() {
-        // Act & Assert
-        assertThatThrownBy(() -> authService.getUserInfo(null))
-            .isInstanceOf(UnauthorizedException.class)
-            .hasMessage("認証が必要です");
     }
 }

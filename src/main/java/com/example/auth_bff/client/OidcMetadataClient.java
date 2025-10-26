@@ -35,7 +35,6 @@ public class OidcMetadataClient {
     @PostConstruct
     public void fetchMetadata() {
         String discoveryUrl = issuerUri + "/.well-known/openid-configuration";
-        log.info("Fetching OIDC metadata from: {}", discoveryUrl);
 
         try {
             OidcConfiguration config = webClient.get()
@@ -46,7 +45,6 @@ public class OidcMetadataClient {
 
             if (config != null && config.getEndSessionEndpoint() != null) {
                 this.endSessionEndpoint = config.getEndSessionEndpoint();
-                log.info("Successfully fetched OIDC metadata. End session endpoint: {}", this.endSessionEndpoint);
             } else {
                 log.error("Failed to fetch or parse end_session_endpoint from OIDC metadata.");
             }

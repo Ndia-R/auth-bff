@@ -12,7 +12,7 @@ import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClient;
-import org.springframework.security.oauth2.client.OAuth2AuthorizedClientService;
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizedClientRepository;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.util.UriBuilder;
@@ -51,14 +51,26 @@ import java.util.Set;
 public class ApiProxyController {
 
     private final WebClient webClient;
-    private final OAuth2AuthorizedClientService authorizedClientService;
+    private final OAuth2AuthorizedClientRepository authorizedClientRepository;
 
     @Value("${app.resource-server.url}")
     private String resourceServerUrl;
 
     /**
      * 除外すべきレスポンスヘッダー
-     * これらはSpringが自動設定するため、リソースサーバーからコピーしない
+     *
+     * <p>これらのヘッダーはSpring Bootが自動的に設定するため、
+     * リソースサーバーからのレスポンスヘッダーをそのままコピーすると
+     * 重複や競合が発生する可能性があります。</p>
+     *
+     * <ul>
+     *   <li><b>transfer-encoding</b>: Spring Bootが自動的にチャンク転送を設定</li>
+     *   <li><b>connection</b>: HTTP/1.1コネクション管理（Keep-Alive等）</li>
+     *   <li><b>keep-alive</b>: コネクション維持設定</li>
+     *   <li><b>upgrade</b>: プロトコルアップグレード（WebSocket等）</li>
+     *   <li><b>server</b>: サーバー情報の漏洩防止</li>
+     *   <li><b>content-length</b>: Spring Bootが自動的に計算</li>
+     * </ul>
      */
     private static final Set<String> EXCLUDED_RESPONSE_HEADERS = Set.of(
         "transfer-encoding",
@@ -106,8 +118,6 @@ public class ApiProxyController {
         String method = request.getMethod();
         String path = request.getRequestURI().replace("/api", "");
 
-        log.debug("Proxying {} request to: {}{}", method, resourceServerUrl, path);
-
         // WebClientリクエストビルダー
         WebClient.RequestBodyUriSpec requestBuilder = webClient.method(HttpMethod.valueOf(method));
 
@@ -147,25 +157,22 @@ public class ApiProxyController {
         final boolean isAuthenticated = authentication != null
             && authentication.isAuthenticated()
             && !(authentication instanceof AnonymousAuthenticationToken);
-        final String principalName = (authentication != null && isAuthenticated) ? authentication.getName() : null;
 
         // ヘッダー設定（共通）
         headersSpec = headersSpec.headers(h -> {
             // 認証済みの場合のみアクセストークンを付与
-            if (isAuthenticated && principalName != null) {
-                OAuth2AuthorizedClient client = authorizedClientService.loadAuthorizedClient(
+            if (isAuthenticated && authentication != null) {
+                OAuth2AuthorizedClient client = authorizedClientRepository.loadAuthorizedClient(
                     "idp",
-                    principalName
+                    authentication,
+                    request
                 );
 
                 if (client != null && client.getAccessToken() != null) {
                     h.setBearerAuth(client.getAccessToken().getTokenValue());
-                    log.debug("Access token added for authenticated user: {}", principalName);
                 } else {
-                    log.warn("Authenticated user {} has no access token", principalName);
+                    log.warn("Authenticated user {} has no access token", authentication.getName());
                 }
-            } else {
-                log.debug("Anonymous request - no access token added");
             }
 
             // リクエストのContent-Typeをリソースサーバーに転送
@@ -175,32 +182,45 @@ public class ApiProxyController {
             }
         });
 
-        // リクエスト実行（ステータスコード・ヘッダー・ボディをすべて保持）
-        return headersSpec
-            .exchangeToMono(response -> {
-                // ステータスコードを保持
-                HttpStatusCode statusCode = response.statusCode();
+        try {
+            // リクエスト実行（ステータスコード・ヘッダー・ボディをすべて保持）
+            ResponseEntity<String> response = headersSpec
+                .exchangeToMono(clientResponse -> {
+                    // ステータスコードを保持
+                    HttpStatusCode statusCode = clientResponse.statusCode();
 
-                // レスポンスヘッダーをフィルタリング
-                HttpHeaders originalHeaders = response.headers().asHttpHeaders();
-                HttpHeaders filteredHeaders = new HttpHeaders();
-                originalHeaders.forEach((name, values) -> {
-                    if (!EXCLUDED_RESPONSE_HEADERS.contains(name.toLowerCase())) {
-                        filteredHeaders.addAll(name, values);
-                    }
-                });
+                    // レスポンスヘッダーをフィルタリング
+                    HttpHeaders originalHeaders = clientResponse.headers().asHttpHeaders();
+                    HttpHeaders filteredHeaders = new HttpHeaders();
+                    originalHeaders.forEach((name, values) -> {
+                        if (!EXCLUDED_RESPONSE_HEADERS.contains(name.toLowerCase())) {
+                            filteredHeaders.addAll(name, values);
+                        }
+                    });
 
-                // ボディを取得してレスポンスを構築
-                // 空のレスポンス（204 No Content等）の場合はdefaultIfEmptyで空文字列を設定
-                return response.bodyToMono(String.class)
-                    .defaultIfEmpty("") // 空の場合のデフォルト値
-                    .map(
-                        responseBody -> ResponseEntity
-                            .status(statusCode)
-                            .headers(filteredHeaders)
-                            .body(responseBody)
-                    );
-            })
-            .block();
+                    // ボディを取得してレスポンスを構築
+                    // 空のレスポンス（204 No Content等）の場合はdefaultIfEmptyで空文字列を設定
+                    return clientResponse.bodyToMono(String.class)
+                        .defaultIfEmpty("") // 空の場合のデフォルト値
+                        .map(
+                            responseBody -> ResponseEntity
+                                .status(statusCode)
+                                .headers(filteredHeaders)
+                                .body(responseBody)
+                        );
+                })
+                .block();
+
+            if (response == null) {
+                log.error("WebClient returned null response - possible timeout or connection error");
+                throw new RuntimeException("リソースサーバーへのリクエストが失敗しました");
+            }
+
+            return response;
+
+        } catch (Exception e) {
+            log.error("Error during API proxy request", e);
+            throw e;
+        }
     }
 }

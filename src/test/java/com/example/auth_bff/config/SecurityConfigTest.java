@@ -60,28 +60,6 @@ class SecurityConfigTest {
     }
 
     /**
-     * テスト: ユーザー情報エンドポイントは認証必須
-     */
-    @Test
-    void testUserEndpoint_WithoutAuthentication_ShouldRedirectToLogin() throws Exception {
-        // 未認証の場合、OAuth2ログインにリダイレクト
-        mockMvc.perform(get("/bff/auth/user"))
-            .andExpect(status().is3xxRedirection());
-    }
-
-    /**
-     * テスト: 認証済みユーザーはユーザー情報エンドポイントにアクセス可能
-     */
-    @Test
-    @WithMockUser
-    void testUserEndpoint_WithAuthentication_ShouldBeAccessible() throws Exception {
-        // モックユーザーでは実際のOAuth2Userが取得できないため、
-        // UnauthorizedExceptionまたは500エラーが返される
-        mockMvc.perform(get("/bff/auth/user"))
-            .andExpect(status().is4xxClientError());
-    }
-
-    /**
      * テスト: APIプロキシエンドポイントは認証不要
      * 認証・権限チェックはリソースサーバー側で実施される
      */

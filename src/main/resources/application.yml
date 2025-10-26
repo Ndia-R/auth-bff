@@ -103,12 +103,17 @@ app:
 rate-limit:
   # レート制限機能の有効/無効
   enabled: ${RATE_LIMIT_ENABLED}
-  # 認証エンドポイントのレート制限（/bff/auth/login, /bff/auth/user）
+  # 認証エンドポイントのレート制限（/bff/auth/login）
   auth:
     rpm: ${RATE_LIMIT_AUTH_RPM}
   # APIプロキシのレート制限（/api/**）
   api:
-    rpm: ${RATE_LIMIT_API_RPM}
+    # 認証済みユーザー（セッションIDベース）
+    authenticated:
+      rpm: ${RATE_LIMIT_API_AUTHENTICATED_RPM}
+    # 未認証ユーザー（IPアドレスベース）未認証でもアクセス可能なエンドポイントを保護
+    anonymous:
+      rpm: ${RATE_LIMIT_API_ANONYMOUS_RPM}
 
 # ============================================
 # Management and Actuator

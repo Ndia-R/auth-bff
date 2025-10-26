@@ -1,7 +1,6 @@
 package com.example.auth_bff.controller;
 
 import com.example.auth_bff.dto.LogoutResponse;
-import com.example.auth_bff.dto.UserResponse;
 import com.example.auth_bff.service.AuthService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -53,11 +52,5 @@ public class AuthController {
     ) {
         LogoutResponse logoutResponse = authService.logout(request, response, principal, complete);
         return ResponseEntity.ok(logoutResponse);
-    }
-
-    @GetMapping("/user")
-    public ResponseEntity<UserResponse> user(@AuthenticationPrincipal OAuth2User principal) {
-        UserResponse response = authService.getUserInfo(principal);
-        return ResponseEntity.ok(response);
     }
 }

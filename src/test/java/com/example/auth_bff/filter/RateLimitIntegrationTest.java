@@ -48,7 +48,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     // レート制限設定（テスト用に低い値）
     "rate-limit.enabled=true",
     "rate-limit.auth.rpm=5",
-    "rate-limit.api.rpm=200",  // APIプロキシは実テストしないため高い値を設定
+    "rate-limit.api.authenticated.rpm=200",  // 認証済みユーザー
+    "rate-limit.api.anonymous.rpm=100",      // 未認証ユーザー
 
     // Redis設定
     "spring.data.redis.host=redis",

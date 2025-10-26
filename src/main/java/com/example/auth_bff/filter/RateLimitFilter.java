@@ -35,16 +35,22 @@ import java.time.Duration;
  *     <th>目的</th>
  *   </tr>
  *   <tr>
- *     <td>/bff/auth/login, /bff/auth/user</td>
+ *     <td>/bff/auth/login</td>
  *     <td>30リクエスト/分</td>
  *     <td>IPアドレス</td>
  *     <td>ブルートフォース攻撃防止</td>
  *   </tr>
  *   <tr>
- *     <td>/api/**</td>
+ *     <td>/api/** (認証済み)</td>
  *     <td>200リクエスト/分</td>
  *     <td>セッションID</td>
  *     <td>API乱用防止</td>
+ *   </tr>
+ *   <tr>
+ *     <td>/api/** (未認証)</td>
+ *     <td>100リクエスト/分</td>
+ *     <td>IPアドレス</td>
+ *     <td>DoS攻撃防止（書籍検索等の公開API保護）</td>
  *   </tr>
  * </table>
  *
@@ -80,8 +86,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
     @Value("${rate-limit.auth.rpm}")
     private int authRateLimitRpm;
 
-    @Value("${rate-limit.api.rpm}")
-    private int apiRateLimitRpm;
+    @Value("${rate-limit.api.authenticated.rpm}")
+    private int apiAuthenticatedRateLimitRpm;
+
+    @Value("${rate-limit.api.anonymous.rpm}")
+    private int apiAnonymousRateLimitRpm;
 
     /**
      * フィルター処理のメインロジック
@@ -116,7 +125,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return;
         }
 
-        BucketConfiguration config = getBucketConfiguration(path);
+        BucketConfiguration config = getBucketConfiguration(key);
 
         // Bucketを取得（Redis上で分散管理）
         Bucket bucket = proxyManager.builder()
@@ -141,10 +150,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
      * <h3>キー生成ルール:</h3>
      * <ul>
      *   <li><b>認証エンドポイント</b>: IPアドレスベース（ブルートフォース対策）</li>
-     *   <li><b>APIプロキシ</b>: セッションIDベース（認証済みユーザー単位）
+     *   <li><b>APIプロキシ（認証済み）</b>: セッションIDベース（認証済みユーザー単位）</li>
+     *   <li><b>APIプロキシ（未認証）</b>: IPアドレスベース（DoS攻撃対策）
      *       <ul>
-     *         <li>セッションがない場合は制限なし（Spring Securityが401を返すため）</li>
-     *         <li>理由: 未認証リクエストでRedis負荷をかけないため</li>
+     *         <li>未認証でもアクセス可能なエンドポイント（書籍検索等）を保護</li>
+     *         <li>認証済みユーザーより厳しい制限を適用</li>
      *       </ul>
      *   </li>
      *   <li><b>その他</b>: nullを返し、レート制限なし</li>
@@ -166,18 +176,16 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return "rate_limit:auth:" + request.getRemoteAddr();
         }
 
-        // APIプロキシ: セッションIDベースのレート制限（認証済みユーザー）
+        // APIプロキシ: 認証済み/未認証で異なるレート制限
         if (path.startsWith("/api")) {
             HttpSession session = request.getSession(false);
             if (session == null) {
-                // セッションがない場合はレート制限をスキップ
-                // 理由:
-                // 1. /api/**は認証必須なので、Spring Securityが401エラーを返す
-                // 2. 未認証リクエストでRedis操作を行うとDoS攻撃時に負荷が増大
-                // 3. 認証前の早期リジェクトにより、リソースを効率的に保護
-                return null;
+                // 未認証ユーザー: IPアドレスベースのレート制限
+                // 未認証でもアクセス可能なエンドポイントを保護
+                return "rate_limit:api:anonymous:" + request.getRemoteAddr();
             }
-            return "rate_limit:api:" + session.getId();
+            // 認証済みユーザー: セッションIDベースのレート制限
+            return "rate_limit:api:authenticated:" + session.getId();
         }
 
         // その他のパスはレート制限なし
@@ -185,21 +193,37 @@ public class RateLimitFilter extends OncePerRequestFilter {
     }
 
     /**
-     * パスに応じたBucket設定を取得
+     * レート制限キーに応じたBucket設定を取得
      *
      * <p>エンドポイントごとに異なるレート制限ルールを適用します。</p>
      *
      * <h3>設定内容:</h3>
      * <ul>
      *   <li><b>認証エンドポイント</b>: 環境変数で設定可能（デフォルト: 30リクエスト/分）</li>
-     *   <li><b>APIプロキシ</b>: 環境変数で設定可能（デフォルト: 200リクエスト/分）</li>
+     *   <li><b>APIプロキシ（認証済み）</b>: 環境変数で設定可能（デフォルト: 200リクエスト/分）</li>
+     *   <li><b>APIプロキシ（未認証）</b>: 環境変数で設定可能（デフォルト: 100リクエスト/分）</li>
      * </ul>
      *
-     * @param path リクエストパス
+     * @param key レート制限キー
      * @return Bucket設定
      */
-    private BucketConfiguration getBucketConfiguration(String path) {
-        long limit = path.startsWith("/bff/auth") ? authRateLimitRpm : apiRateLimitRpm;
+    private BucketConfiguration getBucketConfiguration(String key) {
+        long limit;
+
+        if (key.startsWith("rate_limit:auth:")) {
+            // 認証エンドポイント
+            limit = authRateLimitRpm;
+        } else if (key.startsWith("rate_limit:api:authenticated:")) {
+            // APIプロキシ（認証済みユーザー）
+            limit = apiAuthenticatedRateLimitRpm;
+        } else if (key.startsWith("rate_limit:api:anonymous:")) {
+            // APIプロキシ（未認証ユーザー）
+            limit = apiAnonymousRateLimitRpm;
+        } else {
+            // デフォルト（想定外のケース）
+            limit = 100;
+        }
+
         return BucketConfiguration.builder()
             .addLimit(
                 Bandwidth.builder()

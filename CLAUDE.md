@@ -70,8 +70,8 @@ OIDC準拠の認証プロバイダー（Keycloak、Auth0、Okta等）とのOAuth
 - **RateLimitFilter**: レート制限フィルター（認証エンドポイント・APIプロキシ）
 
 #### コントローラー (controller/)
-- **ApiProxyController**: すべてのAPIリクエストをプロキシ（175行、1メソッドのみ）
-- **AuthController**: 認証エンドポイント（ログイン・ログアウト・ユーザー情報）
+- **ApiProxyController**: すべてのAPIリクエストをプロキシ（214行、1メソッドのみ）
+- **AuthController**: 認証エンドポイント（ログイン・ログアウト）
 
 #### クライアント (client/)
 - **OidcMetadataClient**: OIDC Discovery（メタデータ取得）
@@ -79,7 +79,6 @@ OIDC準拠の認証プロバイダー（Keycloak、Auth0、Okta等）とのOAuth
 #### DTO (dto/)
 - **ErrorResponse**: 統一エラーレスポンス（タイムスタンプ自動生成）
 - **LogoutResponse**: ログアウトレスポンス
-- **UserResponse**: ユーザー情報レスポンス
 - **OidcConfiguration**: OIDC設定情報
 
 #### 例外 (exception/)
@@ -88,7 +87,7 @@ OIDC準拠の認証プロバイダー（Keycloak、Auth0、Okta等）とのOAuth
 - **RateLimitExceededException**: レート制限超過例外
 
 #### サービス (service/)
-- **AuthService**: 認証ビジネスロジック（ログアウト、ユーザー情報取得、IDプロバイダー連携）
+- **AuthService**: 認証ビジネスロジック（ログアウト、IDプロバイダー連携）
 
 ## エンドポイント
 
@@ -97,7 +96,6 @@ OIDC準拠の認証プロバイダー（Keycloak、Auth0、Okta等）とのOAuth
 | メソッド | パス | 説明 | レスポンス |
 |---------|------|------|-----------|
 | GET | `/bff/auth/login` | 認証状態確認・OAuth2フロー開始 | リダイレクト |
-| GET | `/bff/auth/user` | 現在のユーザー情報取得 | `UserResponse` |
 | POST | `/bff/auth/logout` | 通常ログアウト（BFFセッションのみクリア） | `LogoutResponse` |
 | POST | `/bff/auth/logout?complete=true` | 完全ログアウト（IDプロバイダーセッションも無効化） | `LogoutResponse` |
 | GET | `/actuator/health` | ヘルスチェック | Spring Boot Actuator標準レスポンス |
@@ -123,15 +121,6 @@ GET /api/admin/users   →  GET /admin/users    (トークン付与、権限チ�
 ```
 
 ## DTOクラス
-
-### UserResponse
-```json
-{
-  "name": "田中太郎",
-  "email": "tanaka@example.com",
-  "preferred_username": "tanaka"
-}
-```
 
 ### LogoutResponse
 ```json
@@ -217,8 +206,9 @@ Bucket4j + Redisによる分散レート制限を実装し、ブルートフォ�
 
 | エンドポイント | 制限 | 識別方法 | 目的 |
 |--------------|------|---------|------|
-| `/bff/auth/login`, `/bff/auth/user` | 30リクエスト/分 | IPアドレス | ブルートフォース攻撃防止 |
-| `/api/**` | 200リクエスト/分 | セッションID | API乱用防止 |
+| `/bff/auth/login` | 30リクエスト/分 | IPアドレス | ブルートフォース攻撃防止 |
+| `/api/**` (認証済み) | 200リクエスト/分 | セッションID | API乱用防止 |
+| `/api/**` (未認証) | 100リクエスト/分 | IPアドレス | DoS攻撃防止（書籍検索等の公開API保護） |
 
 ### 除外エンドポイント（レート制限なし）
 - `/actuator/health` - 監視システムからのヘルスチェック
@@ -232,7 +222,7 @@ Bucket4j + Redisによる分散レート制限を実装し、ブルートフォ�
   "error": "TOO_MANY_REQUESTS",
   "message": "リクエスト数が制限を超えました。しばらく待ってから再試行してください。",
   "status": 429,
-  "path": "/bff/auth/user",
+  "path": "/bff/auth/login",
   "timestamp": "2025-10-18 15:30:45"
 }
 ```
@@ -245,8 +235,13 @@ RATE_LIMIT_ENABLED=true
 # 認証エンドポイントのレート制限（デフォルト: 30リクエスト/分）
 RATE_LIMIT_AUTH_RPM=30
 
-# APIプロキシのレート制限（デフォルト: 200リクエスト/分）
-RATE_LIMIT_API_RPM=200
+# APIプロキシのレート制限
+# 認証済みユーザー（デフォルト: 200リクエスト/分）
+RATE_LIMIT_API_AUTHENTICATED_RPM=200
+
+# 未認証ユーザー（デフォルト: 100リクエスト/分）
+# 書籍検索など、未認証でもアクセス可能なエンドポイントを保護
+RATE_LIMIT_API_ANONYMOUS_RPM=100
 ```
 
 ### 技術詳細
@@ -480,16 +475,15 @@ src/main/java/com/example/auth_bff/
 │   └── RateLimitFilter.java             # レート制限フィルター
 │
 ├── controller/                          # コントローラー（2ファイル）
-│   ├── ApiProxyController.java          # APIプロキシ（/api/**、175行、1メソッド）
+│   ├── ApiProxyController.java          # APIプロキシ（/api/**、214行、1メソッド）
 │   └── AuthController.java              # 認証エンドポイント（/bff/auth/*）
 │
 ├── client/                              # クライアント（1ファイル）
 │   └── OidcMetadataClient.java          # OIDC Discoveryクライアント
 │
-├── dto/                                 # DTO（4ファイル）
+├── dto/                                 # DTO（3ファイル）
 │   ├── ErrorResponse.java               # 統一エラーレスポンス
 │   ├── LogoutResponse.java              # ログアウトレスポンス
-│   ├── UserResponse.java                # ユーザー情報レスポンス
 │   └── OidcConfiguration.java           # OIDC設定情報
 │
 ├── exception/                           # 例外（3ファイル）
@@ -508,7 +502,7 @@ src/main/java/com/example/auth_bff/
 3. **権限制御の委譲**: BFFは認証に専念、権限はリソースサーバーが管理
 4. **Spring Boot自動設定の活用**: カスタムBean最小限
 5. **統一されたエラーハンドリング**: FilterChainExceptionHandlerとGlobalExceptionHandlerで一貫したエラーレスポンス
-6. **1メソッドプロキシ**: ApiProxyControllerは175行、1メソッドのみ
+6. **1メソッドプロキシ**: ApiProxyControllerは214行、1メソッドのみ
 7. **シンプルな設定管理**: @Valueアノテーションで直接的に設定値を取得
 8. **WebClientシングルトン**: コネクションプール再利用によるパフォーマンス向上
 9. **分散レート制限**: Redis + Bucket4jで複数インスタンス間でレート制限を共有
@@ -559,7 +553,7 @@ src/test/java/com/example/auth_bff/
 ```
 
 #### テストカバレッジ
-- **全26テスト**: すべて成功
+- **全24テスト**: AuthServiceTest (3テスト)、SecurityConfigTest (7テスト)、ApiProxyControllerTest (5テスト)、RateLimitIntegrationTest (7テスト)、AuthBffApplicationTests (1テスト)、TestConfig (1テスト)
 - **単体テスト**: サービス層、コントローラー層
 - **統合テスト**: セキュリティ設定、レート制限（Redis連携）
 
@@ -609,12 +603,15 @@ docker compose up redis -d
 // 1. ログイン開始
 window.location.href = '/bff/auth/login';
 
-// 2. ユーザー情報取得
-fetch('/bff/auth/user', {
+// 2. ログイン完了後、リソースサーバーからユーザー情報取得
+fetch('/api/users/me', {
   credentials: 'include'
 })
   .then(response => response.json())
-  .then(user => console.log(user.name));
+  .then(user => {
+    // { displayName: "田中太郎", avatarPath: "/avatars/123.jpg", email: "..." }
+    console.log(user.displayName);
+  });
 
 // 3. 完全ログアウト
 fetch('/bff/auth/logout?complete=true', {
@@ -758,7 +755,7 @@ JSONレスポンス
   "error": "TOO_MANY_REQUESTS",
   "message": "リクエスト数が制限を超えました。しばらく待ってから再試行してください。",
   "status": 429,
-  "path": "/bff/auth/user",
+  "path": "/bff/auth/login",
   "timestamp": "2025-10-18 14:30:45"
 }
 ```
@@ -782,9 +779,72 @@ JSONレスポンス
 
 #### 機能
 - 認証エンドポイント: 30リクエスト/分（IPアドレスベース）
-- APIプロキシ: 200リクエスト/分（セッションIDベース）
+- APIプロキシ（認証済み）: 200リクエスト/分（セッションIDベース）
+- APIプロキシ（未認証）: 100リクエスト/分（IPアドレスベース）
 - ブルートフォース攻撃・DDoS攻撃の軽減
 - Redis + Bucket4jによる分散レート制限
+
+### ✅ 未認証ユーザーへのレート制限追加（2025-01-26）
+
+#### 背景・課題
+未認証でもアクセス可能なエンドポイント（書籍検索等）が、DoS攻撃に対して脆弱でした。
+
+**修正前の問題:**
+```java
+// セッションがない場合はレート制限をスキップ（❌ 脆弱性）
+if (session == null) {
+    return null; // レート制限なし
+}
+```
+
+**攻撃シナリオ:**
+```bash
+# 未認証で無制限にリクエスト可能
+for i in {1..100000}; do
+  curl "http://localhost:8888/api/books/search?q=test"
+done
+```
+
+#### 解決策
+未認証ユーザーにもIPアドレスベースのレート制限を追加しました。
+
+**修正後:**
+```java
+// 未認証ユーザー: IPアドレスベースのレート制限
+if (session == null) {
+    return "rate_limit:api:anonymous:" + request.getRemoteAddr();
+}
+// 認証済みユーザー: セッションIDベースのレート制限
+return "rate_limit:api:authenticated:" + session.getId();
+```
+
+#### 新しいレート制限ルール
+
+| ユーザー種別 | 制限 | 識別方法 | Redis キー |
+|------------|------|---------|-----------|
+| 認証エンドポイント | 30req/分 | IPアドレス | `rate_limit:auth:{IP}` |
+| API（認証済み） | 200req/分 | セッションID | `rate_limit:api:authenticated:{SESSION_ID}` |
+| API（未認証）✨NEW | 100req/分 | IPアドレス | `rate_limit:api:anonymous:{IP}` |
+
+#### 修正ファイル
+- [RateLimitFilter.java](src/main/java/com/example/auth_bff/filter/RateLimitFilter.java): 未認証ユーザーのレート制限ロジック追加
+- [application.yml](src/main/resources/application.yml): 認証済み/未認証の個別設定
+- [.env](.env), [.env.example](.env.example): 環境変数の更新
+- [RateLimitIntegrationTest.java](src/test/java/com/example/auth_bff/filter/RateLimitIntegrationTest.java): テストプロパティの修正
+
+#### 効果
+- ✅ 未認証でアクセス可能な公開APIエンドポイントもDoS攻撃から保護
+- ✅ 認証済みユーザーは引き続き高い制限値（200req/分）で快適に利用可能
+- ✅ 書籍検索サイト等、未認証ユーザー向けコンテンツがあるサービスに対応
+
+#### 環境変数
+```bash
+# 認証済みユーザー（セッションIDベース）
+RATE_LIMIT_API_AUTHENTICATED_RPM=200
+
+# 未認証ユーザー（IPアドレスベース）✨NEW
+RATE_LIMIT_API_ANONYMOUS_RPM=100
+```
 
 ### 📊 改善サマリー
 
@@ -795,8 +855,11 @@ JSONレスポンス
 | 設定管理 | 複雑な設定クラス | @Value統一 | シンプルで直感的 |
 | WebClient | リクエストごと作成 | シングルトン | 性能向上 |
 | エラー処理 | 基本的な処理のみ | 統一されたエラーハンドリング | 障害対応力向上、保守性向上 |
-| レート制限 | なし | Bucket4j + Redis | セキュリティ強化 |
-| テスト | 基本的なテストのみ | 26テスト（統合テスト含む） | 品質保証 |
+| レート制限（認証済み） | なし | Bucket4j + Redis（200req/分） | セキュリティ強化 |
+| レート制限（未認証）✨NEW | なし（脆弱性） | IPベース（100req/分） | DoS攻撃対策、公開API保護 |
+| OIDC Discovery | なし | OidcMetadataClient | 動的メタデータ取得 |
+| ログ出力 | デバッグログ多数 | エラー/警告のみ | 本番環境最適化 |
+| テスト | 基本的なテストのみ | 24テスト（統合テスト含む） | 品質保証 |
 | ドキュメント | 簡易コメント | 詳細Javadoc | 保守性向上 |
 
 ---

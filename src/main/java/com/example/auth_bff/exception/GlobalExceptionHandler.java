@@ -76,15 +76,15 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
         // 認証サーバーからのエラーレスポンスを分析
         if (ex.getStatusCode().is4xxClientError()) {
-            errorCode = "IDP_PROVIDER_CLIENT_ERROR";
+            errorCode = "IDP_CLIENT_ERROR";
             message = "認証サーバーとの通信でクライアントエラーが発生しました";
             status = HttpStatus.BAD_REQUEST;
         } else if (ex.getStatusCode().is5xxServerError()) {
-            errorCode = "IDP_PROVIDER_SERVER_ERROR";
+            errorCode = "IDP_SERVER_ERROR";
             message = "認証サーバーで障害が発生しています。しばらく時間をおいて再試行してください";
             status = HttpStatus.SERVICE_UNAVAILABLE;
         } else {
-            errorCode = "IDP_PROVIDER_COMMUNICATION_ERROR";
+            errorCode = "IDP_COMMUNICATION_ERROR";
             message = "認証サーバーとの通信でエラーが発生しました";
             status = HttpStatus.INTERNAL_SERVER_ERROR;
         }
@@ -111,7 +111,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
         String path = request.getDescription(false).replace("uri=", "");
         ErrorResponse errorResponse = new ErrorResponse(
-            "IDP_PROVIDER_CONNECTION_ERROR",
+            "IDP_CONNECTION_ERROR",
             "認証サーバーに接続できませんでした。ネットワーク接続を確認してください",
             HttpStatus.SERVICE_UNAVAILABLE.value(),
             path

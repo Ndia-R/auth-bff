@@ -2,8 +2,6 @@ package com.example.auth_bff.service;
 
 import com.example.auth_bff.client.OidcMetadataClient;
 import com.example.auth_bff.dto.LogoutResponse;
-import com.example.auth_bff.dto.UserResponse;
-import com.example.auth_bff.exception.UnauthorizedException;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -82,21 +80,6 @@ public class AuthService {
         }
 
         return new LogoutResponse("success");
-    }
-
-    /**
-     * ユーザー情報を取得する
-     */
-    public UserResponse getUserInfo(OAuth2User principal) {
-        if (principal == null) {
-            throw new UnauthorizedException("認証が必要です");
-        }
-
-        String name = principal.getAttribute("name");
-        String email = principal.getAttribute("email");
-        String preferredUsername = principal.getAttribute("preferred_username");
-
-        return new UserResponse(name, email, preferredUsername);
     }
 
     // ===========================================
@@ -216,14 +199,15 @@ public class AuthService {
                         return clientResponse.bodyToMono(String.class)
                             .then(
                                 Mono.error(
-                                    new RuntimeException("OIDC provider logout failed with " + clientResponse.statusCode())
+                                    new RuntimeException(
+                                        "OIDC provider logout failed with " + clientResponse.statusCode()
+                                    )
                                 )
                             );
                     }
                 })
                 .block();
 
-            log.info("OIDC provider logout completed");
             return true; // 成功
 
         } catch (WebClientResponseException e) {

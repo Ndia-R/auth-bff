@@ -60,7 +60,8 @@
       "Bash(find:*)",
       "Bash(rm:*)",
       "Bash(xargs -r kill -9)",
-      "Bash(code --list-extensions)"
+      "Bash(code --list-extensions)",
+      "Bash(redis-cli -h redis FLUSHALL)"
     ],
     "deny": [],
     "ask": []

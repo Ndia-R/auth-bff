@@ -34,6 +34,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     "app.resource-server.timeout=30",
     "rate-limit.enabled=false"
 })
+@SuppressWarnings("null") // Spring Security Test APIの型アノテーション互換性のため警告を抑制
 class ApiProxyControllerTest {
 
     @Autowired

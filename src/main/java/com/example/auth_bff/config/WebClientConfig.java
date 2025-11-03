@@ -77,9 +77,10 @@ public class WebClientConfig {
                     .addHandlerLast(new WriteTimeoutHandler(resourceServerTimeout, TimeUnit.SECONDS))
             );
 
-        // WebClientをビルド
-        return WebClient.builder()
-            .clientConnector(new ReactorClientHttpConnector(httpClient))
-            .build();
+        // WebClientをビルド（Reactor Netty型アノテーション互換性のため警告を抑制）
+        @SuppressWarnings("null")
+        ReactorClientHttpConnector connector = new ReactorClientHttpConnector(httpClient);
+
+        return WebClient.builder().clientConnector(connector).build();
     }
 }

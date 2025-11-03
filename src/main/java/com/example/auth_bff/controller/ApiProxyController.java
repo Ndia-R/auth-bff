@@ -110,6 +110,7 @@ public class ApiProxyController {
      * @return リソースサーバーからのレスポンス（ステータスコード・ヘッダー・ボディ）
      */
     @RequestMapping("/**")
+    @SuppressWarnings("null") // HttpServletRequest/UriBuilder/WebClient APIの型アノテーション互換性のため警告を抑制
     public ResponseEntity<String> proxyAll(
         HttpServletRequest request,
         @RequestBody(required = false) String body

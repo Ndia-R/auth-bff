@@ -1,4 +1,15 @@
 services:
+  redis:
+    container_name: redis
+    image: redis:8.2
+    networks:
+      - shared-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
   auth-bff:
     container_name: auth-bff
     build:
@@ -32,21 +43,18 @@ services:
       - gradle-cache:/home/vscode/.gradle
       - claude-config:/home/vscode/.claude
       - gemini-config:/home/vscode/.gemini
-    extra_hosts:
-      - "auth.localhost:host-gateway"
+    networks:
+      - shared-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     depends_on:
-      - redis
-    networks:
-      - shared-network
+      redis:
+        condition: service_healthy
     command: sleep infinity
-
-  redis:
-    container_name: redis
-    image: redis:8.2
-    ports:
-      - 6379:6379
-    networks:
-      - shared-network
 
 volumes:
   gradle-cache:
